@@ -15,11 +15,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/testcontainers/testcontainers-go/modules/postgres"
+
+	"github.com/iykeevans/konduite/backend/migrations"
 )
 
 const (
-	image    = "postgres:17-alpine" // matches supabase/config.toml db.major_version
-	template = "konduite_template"
+	image         = "postgres:17-alpine" // matches supabase/config.toml db.major_version
+	template      = "konduite_template"
+	emptyTemplate = "konduite_empty"
 )
 
 var (
@@ -28,8 +31,19 @@ var (
 	startErr error
 )
 
-// New returns a pool on a new, empty database that is dropped when t ends.
+// NewEmpty returns a pool on a new database with no schema, dropped when t ends.
+func NewEmpty(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	return clone(t, emptyTemplate)
+}
+
+// New returns a pool on a new database with every migration applied, dropped when t ends.
 func New(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	return clone(t, template)
+}
+
+func clone(t testing.TB, from string) *pgxpool.Pool {
 	t.Helper()
 	once.Do(start)
 	if startErr != nil {
@@ -38,7 +52,7 @@ func New(t testing.TB) *pgxpool.Pool {
 	ctx := context.Background()
 
 	name := "test_" + randomHex()
-	if err := adminExec(ctx, fmt.Sprintf(`CREATE DATABASE %s TEMPLATE %s`, name, template)); err != nil {
+	if err := adminExec(ctx, fmt.Sprintf(`CREATE DATABASE %s TEMPLATE %s`, name, from)); err != nil {
 		t.Fatalf("dbtest: create database: %v", err)
 	}
 
@@ -78,7 +92,28 @@ func start() {
 		startErr = err
 		return
 	}
-	startErr = adminExec(ctx, `CREATE DATABASE `+template)
+	for _, name := range []string{template, emptyTemplate} {
+		if startErr = adminExec(ctx, `CREATE DATABASE `+name); startErr != nil {
+			return
+		}
+	}
+	startErr = migrateTemplate(ctx)
+}
+
+// Postgres refuses to clone a template that has open connections, so the
+// pool is closed before any test calls New.
+func migrateTemplate(ctx context.Context) error {
+	cfg, err := pgxpool.ParseConfig(adminURL)
+	if err != nil {
+		return err
+	}
+	cfg.ConnConfig.Database = template
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	return migrations.Up(ctx, pool)
 }
 
 func adminExec(ctx context.Context, sql string) error {

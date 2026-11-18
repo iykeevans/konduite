@@ -23,3 +23,15 @@ func TestEachCallGetsAnIsolatedDatabase(t *testing.T) {
 		t.Error("table created through one pool is visible through the other")
 	}
 }
+
+func TestNewReturnsMigratedDatabase(t *testing.T) {
+	pool := dbtest.New(t)
+	var exists bool
+	if err := pool.QueryRow(t.Context(),
+		`SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'workspaces')`).Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Error("dbtest.New returned a database without the workspaces table")
+	}
+}
