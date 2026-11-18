@@ -19,29 +19,33 @@ func TestLoadUsesDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Env != "development" || c.HTTPAddr != ":8080" || c.ShutdownTimeout != 15*time.Second || c.DatabaseURL != dbURL {
-		t.Errorf("config = %+v, want development, :8080, 15s and the given DATABASE_URL", c)
+	if c.Env != "development" || c.HTTPAddr != ":8080" || c.ShutdownTimeout != 15*time.Second || c.DatabaseURL != dbURL ||
+		c.WorkerDrainTimeout != 30*time.Second {
+		t.Errorf("config = %+v, want development, :8080, 15s, the given DATABASE_URL and 30s drain", c)
 	}
 }
 
 func TestLoadReadsOverrides(t *testing.T) {
 	c, err := config.Load(env(map[string]string{
 		"APP_ENV": "production", "API_ADDR": ":9000", "API_SHUTDOWN_TIMEOUT": "30s", "DATABASE_URL": dbURL,
+		"WORKER_DRAIN_TIMEOUT": "1m",
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Env != "production" || c.HTTPAddr != ":9000" || c.ShutdownTimeout != 30*time.Second {
-		t.Errorf("config = %+v, want production, :9000, 30s", c)
+	if c.Env != "production" || c.HTTPAddr != ":9000" || c.ShutdownTimeout != 30*time.Second || c.WorkerDrainTimeout != time.Minute {
+		t.Errorf("config = %+v, want production, :9000, 30s and 1m drain", c)
 	}
 }
 
 func TestLoadReportsEveryProblemAtOnce(t *testing.T) {
-	_, err := config.Load(env(map[string]string{"APP_ENV": "staging", "API_SHUTDOWN_TIMEOUT": "soon"}))
+	_, err := config.Load(env(map[string]string{
+		"APP_ENV": "staging", "API_SHUTDOWN_TIMEOUT": "soon", "WORKER_DRAIN_TIMEOUT": "-5s",
+	}))
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	for _, name := range []string{"APP_ENV", "API_SHUTDOWN_TIMEOUT", "DATABASE_URL"} {
+	for _, name := range []string{"APP_ENV", "API_SHUTDOWN_TIMEOUT", "DATABASE_URL", "WORKER_DRAIN_TIMEOUT"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error %q does not mention %s", err, name)
 		}
