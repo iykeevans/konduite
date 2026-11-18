@@ -12,19 +12,21 @@ func env(vars map[string]string) func(string) string {
 	return func(k string) string { return vars[k] }
 }
 
+const dbURL = "postgres://app@127.0.0.1:54322/konduite"
+
 func TestLoadUsesDefaults(t *testing.T) {
-	c, err := config.Load(env(nil))
+	c, err := config.Load(env(map[string]string{"DATABASE_URL": dbURL}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Env != "development" || c.HTTPAddr != ":8080" || c.ShutdownTimeout != 15*time.Second {
-		t.Errorf("config = %+v, want development, :8080, 15s", c)
+	if c.Env != "development" || c.HTTPAddr != ":8080" || c.ShutdownTimeout != 15*time.Second || c.DatabaseURL != dbURL {
+		t.Errorf("config = %+v, want development, :8080, 15s and the given DATABASE_URL", c)
 	}
 }
 
 func TestLoadReadsOverrides(t *testing.T) {
 	c, err := config.Load(env(map[string]string{
-		"APP_ENV": "production", "API_ADDR": ":9000", "API_SHUTDOWN_TIMEOUT": "30s",
+		"APP_ENV": "production", "API_ADDR": ":9000", "API_SHUTDOWN_TIMEOUT": "30s", "DATABASE_URL": dbURL,
 	}))
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +41,7 @@ func TestLoadReportsEveryProblemAtOnce(t *testing.T) {
 	if err == nil {
 		t.Fatal("want an error")
 	}
-	for _, name := range []string{"APP_ENV", "API_SHUTDOWN_TIMEOUT"} {
+	for _, name := range []string{"APP_ENV", "API_SHUTDOWN_TIMEOUT", "DATABASE_URL"} {
 		if !strings.Contains(err.Error(), name) {
 			t.Errorf("error %q does not mention %s", err, name)
 		}

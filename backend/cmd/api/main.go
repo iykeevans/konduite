@@ -13,6 +13,7 @@ import (
 
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
+	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
 )
 
@@ -33,8 +34,16 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	pool, err := db.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+
 	srv := &http.Server{
-		Handler:           api.NewRouter(api.Deps{}),
+		Handler: api.NewRouter(api.Deps{
+			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
+		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,
 	}
