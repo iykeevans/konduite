@@ -1,0 +1,31 @@
+# Dependencies & builds
+node_modules/
+.next/
+out/
+dist/
+bin/
+coverage/
+*.tsbuildinfo
+
+# Go
+*.test
+*.out
+go.work.sum.bak
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# Local tooling state
+.claude/settings.local.json
+.claude-flow/
+.swarm/
+.DS_Store
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# graphify
+graphify-out/graph.json
