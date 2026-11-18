@@ -1,0 +1,83 @@
+openapi: 3.1.0
+info:
+  title: Konduite API
+  version: 0.1.0
+  description: |
+    All responses use a JSON envelope. Success bodies are `{"data": ...}`.
+    List endpoints add `"meta": {"next_cursor", "has_more"}`. Failures are
+    `{"error": {"code", "message", "details"}}`. Domain errors map to statuses
+    in one place (backend/internal/platform/httpx/error.go).
+servers:
+  - url: http://localhost:8080
+paths:
+  /healthz:
+    get:
+      summary: Liveness. The process is up.
+      responses:
+        "200":
+          description: Alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusEnvelope"
+  /readyz:
+    get:
+      summary: Readiness. Every dependency check passes.
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusEnvelope"
+        "503":
+          description: One or more checks failed. details.failing lists their names.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+components:
+  parameters:
+    Limit:
+      name: limit
+      in: query
+      description: Page size, 1-100. Out-of-range values return 422.
+      schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from a previous page's meta.next_cursor.
+      schema: { type: string }
+  schemas:
+    StatusEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          properties:
+            status: { type: string, enum: [ok, ready] }
+    PageMeta:
+      type: object
+      required: [has_more]
+      properties:
+        next_cursor: { type: string, description: Absent on the last page. }
+        has_more: { type: boolean }
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [not_found, invalid, unauthenticated, forbidden, conflict, unavailable, internal]
+              description: |
+                not_found 404, invalid 422, unauthenticated 401, forbidden 403,
+                conflict 409, unavailable 503, internal 500 (message is always generic).
+            message: { type: string, description: Safe to show to API callers. }
+            details:
+              type: object
+              description: "invalid: {fields: {name: problem}}. unavailable: {failing: [check]}."
