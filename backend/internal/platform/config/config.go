@@ -12,6 +12,7 @@ type Config struct {
 	Env             string        // APP_ENV: development | test | production
 	HTTPAddr        string        // API_ADDR
 	ShutdownTimeout time.Duration // API_SHUTDOWN_TIMEOUT
+	DatabaseURL     string        // DATABASE_URL (required)
 }
 
 // Load reads configuration through getenv (os.Getenv in production) and
@@ -26,8 +27,12 @@ func Load(getenv func(string) string) (Config, error) {
 	}
 
 	c := Config{
-		Env:      or("APP_ENV", "development"),
-		HTTPAddr: or("API_ADDR", ":8080"),
+		Env:         or("APP_ENV", "development"),
+		HTTPAddr:    or("API_ADDR", ":8080"),
+		DatabaseURL: getenv("DATABASE_URL"),
+	}
+	if c.DatabaseURL == "" {
+		problems = append(problems, fmt.Errorf("DATABASE_URL: required (local Supabase: postgresql://postgres:postgres@127.0.0.1:54322/postgres)"))
 	}
 	switch c.Env {
 	case "development", "test", "production":

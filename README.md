@@ -31,20 +31,29 @@ scripts/github/        GitHub Projects bootstrap
 ```bash
 pnpm install          # web dependencies
 make infra-up         # NATS (JetStream), OTel collector, Jaeger
-supabase start        # local Postgres + Auth
+supabase start        # local Postgres + Auth (first run pulls images; config in supabase/config.toml)
+cp .env.example .env  # DATABASE_URL for the local Supabase database
 make test             # Go unit tests
 make lint             # golangci-lint + ESLint
-go run ./backend/cmd/api   # API on :8080 (/healthz, /readyz); env: APP_ENV, API_ADDR, API_SHUTDOWN_TIMEOUT
+set -a; . ./.env; set +a; go run ./backend/cmd/api   # API on :8080; /readyz checks Postgres
 make web-dev          # dashboard on http://localhost:3000
 ```
 
 Run `make help` to list all targets.
+
+### Database
+
+Local Postgres 17 comes from the Supabase CLI: `supabase start` prints the URLs and keys, `supabase status` shows them again, and `supabase stop` shuts it down. The database is at `postgresql://postgres:postgres@127.0.0.1:54322/postgres`, and Supabase Studio is at http://localhost:54323.
+
+Integration tests don't use it. `make test-integration` starts a throwaway `postgres:17-alpine` container through testcontainers (Docker must be running), and each test gets its own database cloned from a template (`backend/internal/platform/dbtest`).
 
 | Service | URL |
 |---|---|
 | NATS | `nats://localhost:4222`, monitoring at http://localhost:8222 |
 | OTLP | gRPC `localhost:4317`, HTTP `localhost:4318` |
 | Jaeger UI | http://localhost:16686 |
+| Postgres (Supabase) | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
+| Supabase Studio | http://localhost:54323 |
 
 ## Regenerating the project board
 

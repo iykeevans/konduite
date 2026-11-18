@@ -27,6 +27,9 @@ jobs:
       - name: Test
         working-directory: ${{ matrix.module }}
         run: go test -race ./...
+      - name: Integration test
+        working-directory: ${{ matrix.module }}
+        run: go test -race -tags integration -timeout 5m ./...
       - name: Lint
         uses: golangci/golangci-lint-action@v8
         with:
