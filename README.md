@@ -35,7 +35,8 @@ supabase start        # local Postgres + Auth (first run pulls images; config in
 cp .env.example .env  # DATABASE_URL for the local Supabase database
 make test             # Go unit tests
 make lint             # golangci-lint + ESLint
-set -a; . ./.env; set +a; go run ./backend/cmd/api   # API on :8080; /readyz checks Postgres
+set -a; . ./.env; set +a; go run ./backend/cmd/api      # API on :8080; /readyz checks Postgres
+set -a; . ./.env; set +a; go run ./backend/cmd/worker   # background consumers; drains on SIGTERM
 make web-dev          # dashboard on http://localhost:3000
 ```
 
