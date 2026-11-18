@@ -34,6 +34,7 @@ make infra-up         # NATS (JetStream), OTel collector, Jaeger
 supabase start        # local Postgres + Auth
 make test             # Go unit tests
 make lint             # golangci-lint + ESLint
+go run ./backend/cmd/api   # API on :8080 (/healthz, /readyz); env: APP_ENV, API_ADDR, API_SHUTDOWN_TIMEOUT
 make web-dev          # dashboard on http://localhost:3000
 ```
 
