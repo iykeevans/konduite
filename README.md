@@ -46,7 +46,9 @@ Run `make help` to list all targets.
 
 Local Postgres 17 comes from the Supabase CLI: `supabase start` prints the URLs and keys, `supabase status` shows them again, and `supabase stop` shuts it down. The database is at `postgresql://postgres:postgres@127.0.0.1:54322/postgres`, and Supabase Studio is at http://localhost:54323.
 
-Integration tests don't use it. `make test-integration` starts a throwaway `postgres:17-alpine` container through testcontainers (Docker must be running), and each test gets its own database cloned from a template (`backend/internal/platform/dbtest`).
+Migrations are goose SQL files in `backend/migrations` (`NNNNN_name.sql` with `-- +goose Up` and `-- +goose Down` sections). Apply them with `make migrate` (`CMD=up|down|status`, default `up`), using `DATABASE_URL` from your environment. Queries live in `backend/sql/queries`. `make sqlc` regenerates `backend/internal/store` from them and the schema. Commit the generated code; CI runs `make sqlc-check` and fails if it is stale.
+
+Integration tests don't use it. `make test-integration` starts a throwaway `postgres:17-alpine` container through testcontainers (Docker must be running), and each test gets its own database cloned from a template that has every migration applied (`backend/internal/platform/dbtest`).
 
 | Service | URL |
 |---|---|

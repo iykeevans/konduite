@@ -36,6 +36,17 @@ jobs:
           version: latest
           working-directory: ${{ matrix.module }}
 
+  generated:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: tools/go.mod
+          cache-dependency-path: tools/go.sum
+      - name: sqlc output is up to date
+        run: make sqlc-check
+
   web:
     runs-on: ubuntu-latest
     steps:
