@@ -14,10 +14,11 @@ import (
 
 func TestOutboxEventRoundTrip(t *testing.T) {
 	q := store.New(dbtest.New(t))
-	aggregate, workspace := uuid.New(), uuid.New()
+	id, aggregate, workspace := uuid.New(), uuid.New(), uuid.New()
 
 	created, err := q.InsertOutboxEvent(t.Context(), store.InsertOutboxEventParams{
-		EventType:   "workspace.created",
+		ID:          id,
+		EventType:  "workspace.created",
 		AggregateID: aggregate,
 		WorkspaceID: &workspace,
 		Payload:     json.RawMessage(`{"name":"Acme"}`),
@@ -34,7 +35,7 @@ func TestOutboxEventRoundTrip(t *testing.T) {
 		t.Fatalf("unpublished = %d events, want 1", len(pending))
 	}
 	got := pending[0]
-	if got.ID != created.ID || got.EventType != "workspace.created" || got.AggregateID != aggregate ||
+	if created.ID != id || got.ID != id || got.EventType != "workspace.created" || got.AggregateID != aggregate ||
 		got.WorkspaceID == nil || *got.WorkspaceID != workspace || got.PublishedAt != nil {
 		t.Errorf("event = %+v, want the inserted event, unpublished", got)
 	}

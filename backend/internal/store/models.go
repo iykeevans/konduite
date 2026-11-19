@@ -54,6 +54,25 @@ type AuditLog struct {
 	CreatedAt    time.Time
 }
 
+type Conversation struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	ProjectID   *uuid.UUID
+	Title       string
+	CreatedBy   uuid.UUID
+	LastSeq     int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ConversationParticipant struct {
+	ID              uuid.UUID
+	ConversationID  uuid.UUID
+	ParticipantType string
+	ParticipantID   uuid.UUID
+	JoinedAt        time.Time
+}
+
 type InboundEvent struct {
 	ID              uuid.UUID
 	Provider        string

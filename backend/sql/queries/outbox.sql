@@ -1,6 +1,6 @@
 -- name: InsertOutboxEvent :one
-INSERT INTO outbox_events (event_type, aggregate_id, workspace_id, payload)
-VALUES ($1, $2, $3, $4)
+INSERT INTO outbox_events (id, event_type, aggregate_id, workspace_id, payload)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: ListUnpublishedOutboxEvents :many
