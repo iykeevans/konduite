@@ -11,6 +11,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type AgentRuntimeInstance struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	OwnerID     uuid.UUID
+	Name        string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type AuditLog struct {
 	ID           uuid.UUID
 	WorkspaceID  *uuid.UUID
@@ -71,6 +80,14 @@ type ProjectMember struct {
 	UserID    uuid.UUID
 	Role      string
 	JoinedAt  time.Time
+}
+
+type RuntimeCredential struct {
+	ID         uuid.UUID
+	RuntimeID  uuid.UUID
+	SecretHash []byte
+	CreatedAt  time.Time
+	LastUsedAt *time.Time
 }
 
 type Workspace struct {

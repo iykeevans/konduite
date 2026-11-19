@@ -3,6 +3,8 @@ package main
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"log/slog"
 	"net"
 	"net/http"
@@ -11,12 +13,18 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
+	"github.com/iykeevans/konduite/backend/internal/authz"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
+	"github.com/iykeevans/konduite/backend/internal/runtimes"
+	"github.com/iykeevans/konduite/backend/internal/store"
 )
 
 func main() {
@@ -42,10 +50,26 @@ func run() error {
 	}
 	defer pool.Close()
 
+	tokenKey, ok := cfg.RuntimeTokenKey.Key()
+	if !ok {
+		if _, tokenKey, err = ed25519.GenerateKey(rand.Reader); err != nil {
+			return err
+		}
+		slog.Warn("RUNTIME_TOKEN_SIGNING_KEY not set: signing runtime tokens with a throwaway key, so they stop working on restart")
+	}
+	az := authz.New(authz.StoreMemberships(store.New(pool)))
+	canRegister := func(ctx context.Context, p auth.Principal, ws uuid.UUID) error {
+		return az.Can(ctx, p, authz.ActionRegisterRuntime, authz.Workspace(ws))
+	}
+	runtimeHandler := runtimes.NewHandler(runtimes.NewService(
+		runtimes.NewPostgresRepository(pool), canRegister, tokenKey))
+
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
+			Routes:          []func(chi.Router){runtimeHandler.Routes},
+			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,

@@ -46,6 +46,115 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/runtimes/register:
+    post:
+      summary: Register a runtime in a workspace and get its refresh credential.
+      description: |
+        The caller becomes the runtime's owner. Owners, admins and developers
+        of the workspace may register; other members get 403, and
+        non-members get 404 as if the workspace did not exist.
+        `refresh_credential` is returned only in this response. The server
+        stores only its SHA-256 hash, so it cannot be shown again.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace_id, name]
+              properties:
+                workspace_id: { type: string, format: uuid }
+                name: { type: string, minLength: 1, maxLength: 100, description: Trimmed. }
+      responses:
+        "201":
+          description: "Registered. Sent with `Cache-Control: no-store`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [runtime_id, workspace_id, owner_id, name, refresh_credential, created_at]
+                    properties:
+                      runtime_id: { type: string, format: uuid }
+                      workspace_id: { type: string, format: uuid }
+                      owner_id: { type: string, format: uuid }
+                      name: { type: string }
+                      refresh_credential:
+                        type: string
+                        description: Long-lived secret (`krt_...`). Store it in the OS keychain and send it only in the body of POST /v1/runtime/token.
+                      created_at: { type: string, format: date-time }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller's role cannot register runtimes in this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: The workspace does not exist or the caller is not a member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, or workspace_id/name invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/runtime/token:
+    post:
+      summary: Exchange a runtime refresh credential for a 15-minute access token.
+      description: |
+        Runtime-facing, so it sits outside /api/v1 and takes no Supabase
+        token: the refresh credential in the body is the authentication.
+        Credentials in the URL or query string are ignored. The access token
+        is an EdDSA (Ed25519) JWT with iss `konduite`, aud `konduite-runtime`,
+        sub and `runtime_id` (the runtime), `workspace_id`, `owner_id`, iat,
+        exp and jti.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_credential]
+              properties:
+                refresh_credential: { type: string }
+      responses:
+        "200":
+          description: "A new access token. Sent with `Cache-Control: no-store`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [access_token, token_type, expires_in, expires_at]
+                    properties:
+                      access_token: { type: string }
+                      token_type: { type: string, enum: [Bearer] }
+                      expires_in: { type: integer, example: 900, description: Seconds. }
+                      expires_at: { type: string, format: date-time }
+        "401":
+          description: Unknown, revoked or malformed refresh credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Body is not JSON, or refresh_credential is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     bearerAuth:
