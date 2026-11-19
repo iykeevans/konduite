@@ -16,3 +16,6 @@ WHERE c.id = $1;
 
 -- name: TouchRuntimeCredential :exec
 UPDATE runtime_credentials SET last_used_at = now() WHERE id = $1;
+
+-- name: DeleteRuntimeCredential :exec
+DELETE FROM runtime_credentials WHERE id = $1;

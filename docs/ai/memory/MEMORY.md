@@ -8,3 +8,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [Workspace and project authorization](workspace-authorization.md) — authz.Can is the one check; non-members get 404 not 403; role x action matrices; owner/admin maintain every project; agent grants hook; build Resource from server-owned ids.
 - [Domain handler pattern](domain-handler-pattern.md) — handler/service/repository split (workspaces is the reference), routes by full path not r.Route, audit rows in the write tx.
 - [Agent identity](agent-identity.md) — agents keyed by (runtime_id, provider, name) from runtime.hello; unannounced go offline not deleted; composite workspace FKs.
+- [Runtime CLI authentication](runtime-cli-auth.md) — agenthub login/logout: loopback PKCE, only the runtime credential in the keychain, logout revokes then clears even on failure.

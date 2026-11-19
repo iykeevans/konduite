@@ -387,6 +387,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/runtime/revoke:
+    post:
+      summary: Revoke a runtime refresh credential.
+      description: |
+        Used by `agenthub logout`. Like /v1/runtime/token, the refresh
+        credential in the body is the authentication, and credentials in the
+        URL are ignored. The credential is deleted, so it can no longer be
+        exchanged. Access tokens already issued from it stay valid until they
+        expire (at most 15 minutes).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_credential]
+              properties:
+                refresh_credential: { type: string }
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          description: Unknown, already revoked or malformed refresh credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Body is not JSON, or refresh_credential is missing.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     bearerAuth:

@@ -59,3 +59,7 @@ func (r postgresRepository) Credential(ctx context.Context, id uuid.UUID) (Crede
 func (r postgresRepository) TouchCredential(ctx context.Context, id uuid.UUID) error {
 	return store.New(r.pool).TouchRuntimeCredential(ctx, id)
 }
+
+func (r postgresRepository) DeleteCredential(ctx context.Context, id uuid.UUID) error {
+	return store.New(r.pool).DeleteRuntimeCredential(ctx, id)
+}

@@ -25,10 +25,17 @@ var (
 
 // Config is the runtime's on-disk settings. It must never gain a credential field.
 type Config struct {
-	ServerURL string `yaml:"server_url"`
-	RuntimeID string `yaml:"runtime_id,omitempty"`
-	LogLevel  string `yaml:"log_level"`
+	ServerURL              string `yaml:"server_url"`
+	RuntimeID              string `yaml:"runtime_id,omitempty"`
+	WorkspaceID            string `yaml:"workspace_id,omitempty"`
+	LogLevel               string `yaml:"log_level"`
+	SupabaseURL            string `yaml:"supabase_url,omitempty"`
+	SupabasePublishableKey string `yaml:"supabase_publishable_key,omitempty"`
+	AuthProvider           string `yaml:"auth_provider,omitempty"`
 }
+
+// Keys lists the settings Set accepts.
+const Keys = "server_url, runtime_id, workspace_id, log_level, supabase_url, supabase_publishable_key, auth_provider"
 
 // Default is the configuration used when no file exists.
 func Default() Config {
@@ -139,10 +146,18 @@ func (c *Config) Set(key, value string) error {
 		next.ServerURL = value
 	case "runtime_id":
 		next.RuntimeID = value
+	case "workspace_id":
+		next.WorkspaceID = value
 	case "log_level":
 		next.LogLevel = value
+	case "supabase_url":
+		next.SupabaseURL = value
+	case "supabase_publishable_key":
+		next.SupabasePublishableKey = value
+	case "auth_provider":
+		next.AuthProvider = value
 	default:
-		return fmt.Errorf("%w %q (known: server_url, runtime_id, log_level)", ErrUnknownKey, key)
+		return fmt.Errorf("%w %q (known: %s)", ErrUnknownKey, key, Keys)
 	}
 	if err := next.Validate(); err != nil {
 		return err
@@ -159,18 +174,39 @@ func (c Config) Validate() error {
 		return fmt.Errorf("%w: log_level must be one of debug, info, warn, error", ErrInvalid)
 	}
 
-	u, err := url.Parse(c.ServerURL)
+	if err := validateURL("server_url", c.ServerURL); err != nil {
+		return err
+	}
+	if c.SupabaseURL != "" {
+		if err := validateURL("supabase_url", c.SupabaseURL); err != nil {
+			return err
+		}
+	}
+	// A Supabase secret key bypasses row-level security; only the publishable key belongs on a developer machine.
+	if strings.HasPrefix(c.SupabasePublishableKey, "sb_secret_") {
+		return fmt.Errorf("supabase_publishable_key is a Supabase secret key: %w", ErrSecret)
+	}
+	for _, r := range c.AuthProvider {
+		if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '_' && r != '-' {
+			return fmt.Errorf("%w: auth_provider must be a Supabase provider name such as github", ErrInvalid)
+		}
+	}
+	return nil
+}
+
+func validateURL(key, raw string) error {
+	u, err := url.Parse(raw)
 	if err != nil {
-		return fmt.Errorf("%w: server_url is not a URL", ErrInvalid)
+		return fmt.Errorf("%w: %s is not a URL", ErrInvalid, key)
 	}
 	if u.User != nil {
-		return fmt.Errorf("server_url carries credentials: %w", ErrSecret)
+		return fmt.Errorf("%s carries credentials: %w", key, ErrSecret)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("%w: server_url must use http or https", ErrInvalid)
+		return fmt.Errorf("%w: %s must use http or https", ErrInvalid, key)
 	}
 	if u.Host == "" {
-		return fmt.Errorf("%w: server_url has no host", ErrInvalid)
+		return fmt.Errorf("%w: %s has no host", ErrInvalid, key)
 	}
 	return nil
 }

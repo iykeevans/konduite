@@ -188,6 +188,14 @@ func TestSet(t *testing.T) {
 		{key: "colour", value: "blue", wantErr: ErrUnknownKey},
 		{key: "log_level", value: "loud", wantErr: ErrInvalid},
 		{key: "server_url", value: "https://ada:pw@x.example", wantErr: ErrSecret}, //nolint:gosec // fake credential that Set must refuse
+		{key: "supabase_url", value: "https://abc.supabase.co", check: func(c Config) bool { return c.SupabaseURL == "https://abc.supabase.co" }},
+		{key: "supabase_url", value: "ftp://abc.supabase.co", wantErr: ErrInvalid},
+		{key: "supabase_url", value: "https://ada:pw@abc.supabase.co", wantErr: ErrSecret}, //nolint:gosec // fake credential that Set must refuse
+		{key: "supabase_publishable_key", value: "sb_publishable_abc", check: func(c Config) bool { return c.SupabasePublishableKey == "sb_publishable_abc" }},
+		{key: "supabase_publishable_key", value: "sb_secret_abc", wantErr: ErrSecret},
+		{key: "workspace_id", value: "0b6c3f9e-8f8e-4c55-9a43-6f1b2d3c4e5f", check: func(c Config) bool { return c.WorkspaceID == "0b6c3f9e-8f8e-4c55-9a43-6f1b2d3c4e5f" }},
+		{key: "auth_provider", value: "github", check: func(c Config) bool { return c.AuthProvider == "github" }},
+		{key: "auth_provider", value: "git hub", wantErr: ErrInvalid},
 	}
 	for _, tt := range tests {
 		t.Run(tt.key+"="+tt.value, func(t *testing.T) {
@@ -230,4 +238,11 @@ func writeFile(t *testing.T, body string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestSupabaseURLIsOptional(t *testing.T) {
+	cfg := Default()
+	if err := cfg.Set("supabase_url", ""); err != nil {
+		t.Fatalf("clearing supabase_url: %v", err)
+	}
 }

@@ -31,11 +31,12 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Post("/runtimes/register", h.register)
 }
 
-// TokenRoutes mounts the token exchange, which authenticates with a refresh
-// credential instead of a user token, so it must not sit behind the Supabase
-// auth middleware (api.Deps.PublicRoutes).
+// TokenRoutes mounts the token exchange and revocation, which authenticate
+// with a refresh credential instead of a user token, so they must not sit
+// behind the Supabase auth middleware (api.Deps.PublicRoutes).
 func (h *Handler) TokenRoutes(r chi.Router) {
 	r.Post("/v1/runtime/token", h.token)
+	r.Post("/v1/runtime/revoke", h.revoke)
 }
 
 type registerRequest struct {
@@ -89,17 +90,12 @@ type tokenResponse struct {
 }
 
 func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
-	var req tokenRequest
-	if err := decode(w, r, &req); err != nil {
+	cred, err := refreshCredential(w, r)
+	if err != nil {
 		httpx.Error(w, r, err)
 		return
 	}
-	if req.RefreshCredential == "" {
-		httpx.Error(w, r, errs.Invalid("refresh_credential is required in the request body",
-			map[string]string{"refresh_credential": "required"}))
-		return
-	}
-	tok, err := h.svc.Exchange(r.Context(), req.RefreshCredential)
+	tok, err := h.svc.Exchange(r.Context(), cred)
 	if err != nil {
 		httpx.Error(w, r, err)
 		return
@@ -111,6 +107,31 @@ func (h *Handler) token(w http.ResponseWriter, r *http.Request) {
 		ExpiresIn:   int(TokenTTL / time.Second),
 		ExpiresAt:   tok.ExpiresAt,
 	})
+}
+
+func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
+	cred, err := refreshCredential(w, r)
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	if err := h.svc.Revoke(r.Context(), cred); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func refreshCredential(w http.ResponseWriter, r *http.Request) (string, error) {
+	var req tokenRequest
+	if err := decode(w, r, &req); err != nil {
+		return "", err
+	}
+	if req.RefreshCredential == "" {
+		return "", errs.Invalid("refresh_credential is required in the request body",
+			map[string]string{"refresh_credential": "required"})
+	}
+	return req.RefreshCredential, nil
 }
 
 func decode(w http.ResponseWriter, r *http.Request, dst any) error {

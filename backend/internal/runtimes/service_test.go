@@ -58,6 +58,13 @@ func (f *fakeRepo) TouchCredential(_ context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (f *fakeRepo) DeleteCredential(_ context.Context, id uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.credentials, id)
+	return nil
+}
+
 func memberOf(user, workspace uuid.UUID) runtimes.AuthorizeRegister {
 	return func(_ context.Context, p auth.Principal, workspaceID uuid.UUID) error {
 		if p.ID == user && workspaceID == workspace {
@@ -260,5 +267,48 @@ func TestExpiredRuntimeTokenIsRejected(t *testing.T) {
 	}
 	if _, err := runtimes.VerifyAccessToken(pub, string(signed)); err == nil {
 		t.Error("an expired token verified")
+	}
+}
+
+func TestRevokedCredentialNoLongerExchanges(t *testing.T) {
+	f := newFixture(t)
+	reg, err := f.svc.Register(t.Context(), f.user, runtimes.RegisterInput{WorkspaceID: f.workspace, Name: "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := f.svc.Revoke(t.Context(), reg.RefreshCredential); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+
+	if len(f.repo.credentials) != 0 {
+		t.Errorf("%d credentials left after revoke, want 0", len(f.repo.credentials))
+	}
+	_, err = f.svc.Exchange(t.Context(), reg.RefreshCredential)
+	wantKind(t, err, errs.KindUnauthenticated)
+	err = f.svc.Revoke(t.Context(), reg.RefreshCredential)
+	wantKind(t, err, errs.KindUnauthenticated)
+}
+
+func TestRevokeRejectsBadCredentialsAndKeepsTheRealOne(t *testing.T) {
+	f := newFixture(t)
+	reg, err := f.svc.Register(t.Context(), f.user, runtimes.RegisterInput{WorkspaceID: f.workspace, Name: "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	last := reg.RefreshCredential[len(reg.RefreshCredential)-2:]
+	flipped := reg.RefreshCredential[:len(reg.RefreshCredential)-2] + map[bool]string{true: "AA", false: "BB"}[last != "AA"]
+
+	for name, cred := range map[string]string{
+		"empty":        "",
+		"not base64":   "krt_!!!!",
+		"wrong secret": flipped,
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantKind(t, f.svc.Revoke(t.Context(), cred), errs.KindUnauthenticated)
+		})
+	}
+	if _, err := f.svc.Exchange(t.Context(), reg.RefreshCredential); err != nil {
+		t.Errorf("real credential stopped working after bad revokes: %v", err)
 	}
 }

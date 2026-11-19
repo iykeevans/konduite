@@ -84,4 +84,7 @@ type Repository interface {
 	Create(ctx context.Context, n NewRuntime) (Runtime, uuid.UUID, error)
 	Credential(ctx context.Context, id uuid.UUID) (Credential, error)
 	TouchCredential(ctx context.Context, id uuid.UUID) error
+	// DeleteCredential removes a credential. Deleting one that is already
+	// gone is not an error.
+	DeleteCredential(ctx context.Context, id uuid.UUID) error
 }

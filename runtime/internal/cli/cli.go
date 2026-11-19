@@ -3,18 +3,26 @@ package cli
 
 import (
 	"fmt"
+	"net/http"
+	"time"
 
 	"github.com/spf13/cobra"
 	"go.yaml.in/yaml/v3"
 
+	"github.com/iykeevans/konduite/runtime/internal/auth"
 	"github.com/iykeevans/konduite/runtime/internal/config"
+	"github.com/iykeevans/konduite/runtime/internal/security"
 	"github.com/iykeevans/konduite/runtime/internal/version"
 )
 
-// Options injects build info and the environment so tests can drive the CLI in-process.
+// Options injects build info, the environment and the outside world so tests
+// can drive the CLI in-process. Nil fields get the real implementations.
 type Options struct {
-	Version version.Info
-	Getenv  func(string) string
+	Version     version.Info
+	Getenv      func(string) string
+	Keychain    security.Keychain
+	HTTPClient  *http.Client
+	OpenBrowser func(url string) error
 }
 
 // New returns the root agenthub command.
@@ -32,6 +40,18 @@ func New(opts Options) *cobra.Command {
 	root.PersistentFlags().StringVar(&configFlag, "config", "", "config file (default $AGENTHUB_CONFIG, then $XDG_CONFIG_HOME/agenthub/config.yaml, then ~/.config/agenthub/config.yaml)")
 
 	configPath := func() (string, error) { return config.Path(configFlag, opts.Getenv) }
+	if opts.Keychain == nil {
+		opts.Keychain = security.OSKeychain{}
+	}
+	if opts.HTTPClient == nil {
+		opts.HTTPClient = &http.Client{Timeout: 30 * time.Second}
+	}
+	if opts.OpenBrowser == nil {
+		opts.OpenBrowser = openBrowser
+	}
+	client := func(cmd *cobra.Command) auth.Client {
+		return auth.Client{Keychain: opts.Keychain, HTTP: opts.HTTPClient, Open: opts.OpenBrowser, Out: cmd.ErrOrStderr()}
+	}
 
 	root.AddCommand(
 		&cobra.Command{
@@ -44,6 +64,9 @@ func New(opts Options) *cobra.Command {
 			},
 		},
 		newConfigCmd(configPath),
+		newLoginCmd(configPath, client),
+		newLogoutCmd(configPath, client),
+		newWhoamiCmd(configPath, client),
 	)
 	return root
 }
@@ -90,7 +113,7 @@ func newConfigCmd(configPath func() (string, error)) *cobra.Command {
 		},
 		&cobra.Command{
 			Use:   "set <key> <value>",
-			Short: "Change a setting (server_url, runtime_id, log_level)",
+			Short: "Change a setting (" + config.Keys + ")",
 			Args:  cobra.ExactArgs(2),
 			RunE: func(_ *cobra.Command, args []string) error {
 				path, err := configPath()

@@ -12,6 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteRuntimeCredential = `-- name: DeleteRuntimeCredential :exec
+DELETE FROM runtime_credentials WHERE id = $1
+`
+
+func (q *Queries) DeleteRuntimeCredential(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteRuntimeCredential, id)
+	return err
+}
+
 const getRuntimeCredential = `-- name: GetRuntimeCredential :one
 SELECT c.id, c.secret_hash, r.id AS runtime_id, r.workspace_id, r.owner_id
 FROM runtime_credentials c
