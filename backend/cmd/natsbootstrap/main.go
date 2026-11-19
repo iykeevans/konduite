@@ -11,11 +11,12 @@ import (
 
 	natsgo "github.com/nats-io/nats.go"
 
+	"github.com/iykeevans/konduite/backend/internal/platform/log"
 	"github.com/iykeevans/konduite/backend/internal/platform/nats"
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	slog.SetDefault(log.New(os.Stdout, slog.LevelInfo))
 	if err := run(); err != nil {
 		slog.Error("nats bootstrap failed", "error", err)
 		os.Exit(1)
