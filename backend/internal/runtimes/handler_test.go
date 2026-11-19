@@ -161,3 +161,48 @@ func TestTokenEndpointRejectsAWrongCredential(t *testing.T) {
 		t.Errorf("status = %d, code = %q, want 401 unauthenticated", rec.Code, resp.Error.Code)
 	}
 }
+
+func TestRevokeEndpointDeletesTheCredentialFromTheBody(t *testing.T) {
+	f := newFixture(t)
+	cred := register(t, f)
+	body := `{"refresh_credential":"` + cred + `"}`
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/v1/runtime/revoke", strings.NewReader(body))
+	router(f, nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Fatalf("status = %d, body %q, want 204 with no body", rec.Code, rec.Body)
+	}
+
+	rec, resp := post(t, router(f, nil), "/v1/runtime/token", body)
+	if rec.Code != http.StatusUnauthorized || resp.Error.Code != "unauthenticated" {
+		t.Errorf("token after revoke: status = %d, want 401", rec.Code)
+	}
+}
+
+func TestRevokeEndpointRejects(t *testing.T) {
+	f := newFixture(t)
+	cred := register(t, f)
+	tests := []struct {
+		name   string
+		target string
+		body   string
+		status int
+	}{
+		{"wrong credential", "/v1/runtime/revoke", `{"refresh_credential":"krt_nope"}`, http.StatusUnauthorized},
+		{"missing credential", "/v1/runtime/revoke", `{}`, http.StatusUnprocessableEntity},
+		{"credential only in the URL", "/v1/runtime/revoke?refresh_credential=" + url.QueryEscape(cred), `{}`, http.StatusUnprocessableEntity},
+		{"not JSON", "/v1/runtime/revoke", `nope`, http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, _ := post(t, router(f, nil), tt.target, tt.body)
+			if rec.Code != tt.status {
+				t.Errorf("status = %d, want %d (%s)", rec.Code, tt.status, rec.Body)
+			}
+		})
+	}
+	if len(f.repo.credentials) != 1 {
+		t.Errorf("%d credentials left, want the real one kept", len(f.repo.credentials))
+	}
+}

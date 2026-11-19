@@ -53,6 +53,16 @@ func TestPostgresRepositoryStoresARuntimeWithItsCredential(t *testing.T) {
 	if _, err := repo.Credential(ctx, uuid.New()); !errors.Is(err, runtimes.ErrCredentialNotFound) {
 		t.Errorf("unknown credential: err = %v, want ErrCredentialNotFound", err)
 	}
+
+	if err := repo.DeleteCredential(ctx, credID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repo.Credential(ctx, credID); !errors.Is(err, runtimes.ErrCredentialNotFound) {
+		t.Errorf("deleted credential: err = %v, want ErrCredentialNotFound", err)
+	}
+	if err := repo.DeleteCredential(ctx, credID); err != nil {
+		t.Errorf("deleting an already deleted credential: %v, want nil", err)
+	}
 }
 
 func TestPostgresRepositoryStoresNothingWhenTheCredentialFails(t *testing.T) {

@@ -79,26 +79,44 @@ func (s *Service) Register(ctx context.Context, p auth.Principal, in RegisterInp
 // Exchange returns a fresh runtime access token for a refresh credential.
 // Every kind of bad credential gets the same errs.Unauthenticated error.
 func (s *Service) Exchange(ctx context.Context, refreshCredential string) (AccessToken, error) {
-	denied := errs.Unauthenticated("invalid refresh credential")
-	id, secret, ok := decodeCredential(refreshCredential)
-	if !ok {
-		return AccessToken{}, denied
-	}
-	cred, err := s.repo.Credential(ctx, id)
-	if errors.Is(err, ErrCredentialNotFound) {
-		return AccessToken{}, denied
-	}
+	cred, err := s.verify(ctx, refreshCredential)
 	if err != nil {
 		return AccessToken{}, err
-	}
-	hash := sha256.Sum256(secret)
-	if subtle.ConstantTimeCompare(hash[:], cred.SecretHash) != 1 {
-		return AccessToken{}, denied
 	}
 	if err := s.repo.TouchCredential(ctx, cred.ID); err != nil {
 		return AccessToken{}, err
 	}
 	return s.signer.sign(cred)
+}
+
+// Revoke deletes a refresh credential so it can no longer be exchanged.
+// Access tokens already issued for it stay valid until they expire.
+func (s *Service) Revoke(ctx context.Context, refreshCredential string) error {
+	cred, err := s.verify(ctx, refreshCredential)
+	if err != nil {
+		return err
+	}
+	return s.repo.DeleteCredential(ctx, cred.ID)
+}
+
+func (s *Service) verify(ctx context.Context, refreshCredential string) (Credential, error) {
+	denied := errs.Unauthenticated("invalid refresh credential")
+	id, secret, ok := decodeCredential(refreshCredential)
+	if !ok {
+		return Credential{}, denied
+	}
+	cred, err := s.repo.Credential(ctx, id)
+	if errors.Is(err, ErrCredentialNotFound) {
+		return Credential{}, denied
+	}
+	if err != nil {
+		return Credential{}, err
+	}
+	hash := sha256.Sum256(secret)
+	if subtle.ConstantTimeCompare(hash[:], cred.SecretHash) != 1 {
+		return Credential{}, denied
+	}
+	return cred, nil
 }
 
 func encodeCredential(id uuid.UUID, secret []byte) string {
