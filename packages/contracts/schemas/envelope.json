@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/envelope.json",
+  "title": "Envelope",
+  "description": "An event published to NATS on subject agenthub.<type>. The workspace comes from the server-side write that produced the event, never from client input.",
+  "type": "object",
+  "required": ["id", "type", "version", "occurred_at", "workspace_id", "correlation_id", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "Event id. Also the Nats-Msg-Id, so consumers dedupe on it.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "description": "Dotted event name, e.g. runtime.connected. Selects the payload schema in events/.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+    },
+    "version": {
+      "description": "Payload schema version for this type.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "occurred_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workspace_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "project_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "correlation_id": {
+      "description": "Shared by every event that stems from the same originating request.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "causation_id": {
+      "description": "Id of the event or request that directly caused this one.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "data": {
+      "description": "Payload, validated against events/<type>.v<version>.json.",
+      "type": "object",
+      "goJSONSchema": { "type": "json.RawMessage", "imports": ["encoding/json"] },
+      "tsType": "Record<string, unknown>"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/frames/runtime.heartbeat.v1.json",
+  "title": "RuntimeHeartbeat",
+  "description": "Sent every 15s. The server marks the runtime offline after 45s without one.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {}
+}

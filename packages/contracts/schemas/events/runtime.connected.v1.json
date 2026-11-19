@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/events/runtime.connected.v1.json",
+  "title": "RuntimeConnected",
+  "description": "A runtime completed its hello and is online.",
+  "type": "object",
+  "required": ["runtime_id"],
+  "additionalProperties": false,
+  "properties": {
+    "runtime_id": { "type": "string", "format": "uuid" }
+  }
+}
