@@ -16,6 +16,13 @@ $(BIN)/goose: tools/go.mod
 $(BIN)/golangci-lint: tools/go.mod
 	cd tools && GOWORK=off go build -o $(BIN)/ github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 
+.PHONY: agenthub
+AGENTHUB_LDFLAGS := -X github.com/iykeevans/konduite/runtime/internal/version.version=$(shell git describe --tags --always --dirty 2>/dev/null || echo dev) \
+	-X github.com/iykeevans/konduite/runtime/internal/version.commit=$(shell git rev-parse --short HEAD 2>/dev/null || echo none) \
+	-X github.com/iykeevans/konduite/runtime/internal/version.date=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+agenthub: ## Build the runtime CLI into ./bin/agenthub with version info
+	cd runtime && go build -ldflags "$(AGENTHUB_LDFLAGS)" -o $(BIN)/agenthub ./cmd/agenthub
+
 dev: infra-up ## Start local infrastructure (Supabase, NATS, OTel, Jaeger); api/worker/web join as they land
 	@command -v supabase >/dev/null && supabase status >/dev/null 2>&1 || echo "hint: run 'supabase start' for local Postgres + Auth (PLAT-004)"
 	@echo "Jaeger UI: http://localhost:16686  NATS monitor: http://localhost:8222"
