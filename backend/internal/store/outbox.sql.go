@@ -13,12 +13,13 @@ import (
 )
 
 const insertOutboxEvent = `-- name: InsertOutboxEvent :one
-INSERT INTO outbox_events (event_type, aggregate_id, workspace_id, payload)
-VALUES ($1, $2, $3, $4)
+INSERT INTO outbox_events (id, event_type, aggregate_id, workspace_id, payload)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING id, event_type, aggregate_id, workspace_id, payload, created_at, published_at
 `
 
 type InsertOutboxEventParams struct {
+	ID          uuid.UUID
 	EventType   string
 	AggregateID uuid.UUID
 	WorkspaceID *uuid.UUID
@@ -27,6 +28,7 @@ type InsertOutboxEventParams struct {
 
 func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventParams) (OutboxEvent, error) {
 	row := q.db.QueryRow(ctx, insertOutboxEvent,
+		arg.ID,
 		arg.EventType,
 		arg.AggregateID,
 		arg.WorkspaceID,

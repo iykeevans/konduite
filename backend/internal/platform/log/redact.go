@@ -28,11 +28,11 @@ var (
 )
 
 func redactAttr(groups []string, a slog.Attr) slog.Attr {
-	if sensitiveKey(a.Key) {
+	if SensitiveKey(a.Key) {
 		return slog.String(a.Key, Redacted)
 	}
 	for _, g := range groups {
-		if sensitiveKey(g) {
+		if SensitiveKey(g) {
 			return slog.String(a.Key, Redacted)
 		}
 	}
@@ -47,7 +47,9 @@ func redactAttr(groups []string, a slog.Attr) slog.Attr {
 	return a
 }
 
-func sensitiveKey(key string) bool {
+// SensitiveKey reports whether a field named key holds a credential. Case and
+// the separators - _ . and space are ignored, so api_key matches apikey.
+func SensitiveKey(key string) bool {
 	k := strings.Map(func(r rune) rune {
 		switch r {
 		case '-', '_', '.', ' ':
@@ -61,6 +63,12 @@ func sensitiveKey(key string) bool {
 		}
 	}
 	return false
+}
+
+// SecretValue reports whether s looks like a credential whatever its key: a
+// bearer or basic auth value, a JWT, or a URL with a password.
+func SecretValue(s string) bool {
+	return authSchemeValue.MatchString(s) || jwtValue.MatchString(s) || urlPassword.MatchString(s)
 }
 
 func scrub(s string) string {

@@ -238,6 +238,106 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations:
+    post:
+      summary: Start a conversation in a workspace.
+      description: |
+        Every workspace member may create one. The caller becomes `created_by`
+        and the first participant (type `user`). Non-members get 404 as if
+        the workspace did not exist.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workspace_id]
+              properties:
+                workspace_id: { type: string, format: uuid }
+                project_id: { type: string, format: uuid, description: Must be a project in the same workspace. }
+                title: { type: string, maxLength: 200, default: "", description: Trimmed. }
+      responses:
+        "201":
+          description: Created, with the creator as the only participant.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Conversation" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: The workspace does not exist or the caller is not a member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, bad ids, a project outside the workspace, or a title over 200 characters (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: List a workspace's conversations, newest first.
+      description: Every workspace member sees every conversation in it. Items omit `participants`.
+      parameters:
+        - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: project_id, in: query, description: Only conversations in this project., schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of conversations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Conversation" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: The workspace does not exist or the caller is not a member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: workspace_id missing or not a UUID, or a bad project_id, limit or cursor (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations/{id}:
+    get:
+      summary: Get a conversation with its participants.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The conversation.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Conversation" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such conversation, or it is in a workspace the caller is not a member of. Both get the same response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /v1/runtime/token:
     post:
       summary: Exchange a runtime refresh credential for a 15-minute access token.
@@ -368,6 +468,32 @@ components:
       properties:
         next_cursor: { type: string, description: Absent on the last page. }
         has_more: { type: boolean }
+    Conversation:
+      type: object
+      required: [id, workspace_id, project_id, title, created_by, last_seq, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        project_id: { type: [string, "null"], format: uuid }
+        title: { type: string }
+        created_by: { type: string, format: uuid }
+        last_seq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Sequence number of the latest message; 0 before the first one.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        participants:
+          type: array
+          description: Present on create and get, omitted in lists.
+          items:
+            type: object
+            required: [type, id, joined_at]
+            properties:
+              type: { type: string, enum: [user, agent, runtime] }
+              id: { type: string, format: uuid, description: A user, agent or runtime id depending on type. }
+              joined_at: { type: string, format: date-time }
     ErrorEnvelope:
       type: object
       required: [error]
