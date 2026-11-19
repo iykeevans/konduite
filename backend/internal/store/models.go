@@ -11,6 +11,28 @@ import (
 	"github.com/google/uuid"
 )
 
+type Agent struct {
+	ID           uuid.UUID
+	WorkspaceID  uuid.UUID
+	RuntimeID    uuid.UUID
+	Provider     string
+	Name         string
+	Version      *string
+	Capabilities json.RawMessage
+	Status       string
+	LastSeenAt   time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type AgentProjectAccess struct {
+	AgentID     uuid.UUID
+	ProjectID   uuid.UUID
+	WorkspaceID uuid.UUID
+	GrantedBy   uuid.UUID
+	GrantedAt   time.Time
+}
+
 type AgentRuntimeInstance struct {
 	ID          uuid.UUID
 	WorkspaceID uuid.UUID
