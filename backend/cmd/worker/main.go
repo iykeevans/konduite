@@ -12,6 +12,7 @@ import (
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
+	"github.com/iykeevans/konduite/backend/internal/platform/nats"
 	"github.com/iykeevans/konduite/backend/internal/worker"
 )
 
@@ -37,6 +38,15 @@ func run() error {
 		return err
 	}
 	defer pool.Close()
+
+	bus, err := nats.Connect(cfg.NATSURL, "konduite-worker")
+	if err != nil {
+		return err
+	}
+	defer bus.Close()
+	if err := bus.EnsureStreams(ctx); err != nil {
+		return err
+	}
 
 	reg := worker.NewRegistry()
 	// Consumers are registered here as they land, starting with the outbox relay (MSG-004).
