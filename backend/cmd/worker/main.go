@@ -11,11 +11,12 @@ import (
 
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
+	"github.com/iykeevans/konduite/backend/internal/platform/log"
 	"github.com/iykeevans/konduite/backend/internal/worker"
 )
 
 func main() {
-	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+	slog.SetDefault(log.New(os.Stdout, slog.LevelInfo))
 	if err := run(); err != nil {
 		slog.Error("worker exited", "error", err)
 		os.Exit(1)
