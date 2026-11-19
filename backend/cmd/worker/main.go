@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/iykeevans/konduite/backend/internal/outbox"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
@@ -49,7 +50,10 @@ func run() error {
 	}
 
 	reg := worker.NewRegistry()
-	// Consumers are registered here as they land, starting with the outbox relay (MSG-004).
+	relay := outbox.NewRelay(pool, bus, outbox.Config{Logger: slog.Default()})
+	if err := reg.Add("outbox-relay", relay.Run); err != nil {
+		return err
+	}
 
 	slog.Info("worker started", "env", cfg.Env)
 	if err := reg.Run(ctx, cfg.WorkerDrainTimeout); err != nil {
