@@ -106,6 +106,138 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/workspaces:
+    post:
+      summary: Create a workspace. The caller becomes its owner.
+      description: |
+        Any signed-in user may create a workspace. The workspace, the
+        caller's owner membership and a `workspace.created` audit log entry
+        are written in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, slug]
+              properties:
+                name: { $ref: "#/components/schemas/WorkspaceName" }
+                slug: { $ref: "#/components/schemas/WorkspaceSlug" }
+      responses:
+        "201":
+          description: Created. `Location` is the new workspace's URL.
+          headers:
+            Location:
+              schema: { type: string, example: /api/v1/workspaces/7f0c4d1e-6a43-4d8e-9a55-2b1f0b0e8c11 }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "409":
+          description: The slug is already taken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, or name/slug invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: List the workspaces the caller is a member of, ordered by slug.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of workspaces, each with the caller's role.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Workspace" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "422":
+          description: limit out of range or cursor malformed (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/workspaces/{workspaceId}:
+    parameters:
+      - name: workspaceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get a workspace the caller is a member of.
+      responses:
+        "200":
+          description: The workspace, with the caller's role.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+    patch:
+      summary: Rename a workspace or change its slug.
+      description: |
+        Owners and admins may update. Other members get 403. Send at least one
+        field; omitted fields are left unchanged. When something actually
+        changes, a `workspace.updated` audit log entry recording the old and
+        new values is written in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { $ref: "#/components/schemas/WorkspaceName" }
+                slug: { $ref: "#/components/schemas/WorkspaceSlug" }
+      responses:
+        "200":
+          description: The updated workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller's role cannot update this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "409":
+          description: The slug is already taken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed or empty body, or name/slug invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/conversations:
     post:
       summary: Start a conversation in a workspace.
@@ -272,6 +404,14 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    WorkspaceNotFound:
+      description: |
+        The workspace does not exist, the caller is not a member, or the id is
+        not a UUID. All three look the same so ids cannot be probed.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
   parameters:
     Limit:
       name: limit
@@ -292,6 +432,36 @@ components:
           type: object
           properties:
             status: { type: string, enum: [ok, ready] }
+    WorkspaceName:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Trimmed.
+    WorkspaceSlug:
+      type: string
+      minLength: 3
+      maxLength: 50
+      pattern: "^[a-z0-9]+(-[a-z0-9]+)*$"
+      description: Unique across all workspaces. Trimmed.
+    Workspace:
+      type: object
+      required: [id, name, slug, role, created_by, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        role:
+          type: string
+          enum: [owner, admin, developer, project_manager]
+          description: The caller's role in this workspace.
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    WorkspaceEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Workspace" }
     PageMeta:
       type: object
       required: [has_more]
