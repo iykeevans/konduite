@@ -19,6 +19,7 @@ import (
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
 	"github.com/iykeevans/konduite/backend/internal/authz"
+	"github.com/iykeevans/konduite/backend/internal/conversations"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
@@ -63,12 +64,14 @@ func run() error {
 	}
 	runtimeHandler := runtimes.NewHandler(runtimes.NewService(
 		runtimes.NewPostgresRepository(pool), canRegister, tokenKey))
+	conversationHandler := conversations.NewHandler(conversations.NewService(
+		conversations.NewPostgresRepository(pool), az))
 
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
-			Routes:          []func(chi.Router){runtimeHandler.Routes},
+			Routes:          []func(chi.Router){runtimeHandler.Routes, conversationHandler.Routes},
 			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

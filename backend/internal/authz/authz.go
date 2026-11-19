@@ -53,6 +53,9 @@ const (
 	ActionCreateProject   Action = "workspace.projects.create"
 	ActionRegisterRuntime Action = "workspace.runtimes.register"
 	ActionViewAuditLog    Action = "workspace.audit_log.view"
+
+	ActionViewConversations  Action = "workspace.conversations.view"
+	ActionCreateConversation Action = "workspace.conversations.create"
 )
 
 var everyone = []Role{RoleOwner, RoleAdmin, RoleDeveloper, RoleProjectManager}
@@ -67,6 +70,9 @@ var allowed = map[Action][]Role{
 	ActionCreateProject:   {RoleOwner, RoleAdmin, RoleProjectManager},
 	ActionRegisterRuntime: {RoleOwner, RoleAdmin, RoleDeveloper},
 	ActionViewAuditLog:    {RoleOwner, RoleAdmin},
+
+	ActionViewConversations:  everyone,
+	ActionCreateConversation: everyone,
 }
 
 // Resource is what an action targets. Build it with Workspace.
