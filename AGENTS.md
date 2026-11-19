@@ -33,6 +33,7 @@ tracker:
   kind: github                             # linear | jira | github | none
   issue_prefix: ""                         # multiple ticket prefixes (PLAT, RT, MSG, AGENT, ADP, SLACK, COL, SEC, OBS, WEB); see Tracker notes
   shipped_status: "In progress"            # Status on the "Konduite MVP" board once the branch is pushed
+  pr_opened_status: "In review"            # Status once the PR for the ticket is open
 compare_url: "https://github.com/iykeevans/konduite/compare/{branch}?expand=1"
 memory_dir: docs/ai/memory
 handoff_file: docs/ai/HANDOFF.md
@@ -52,7 +53,7 @@ feature_layout:                            # used by new-feature
 
 - Tickets are GitHub issues in `iykeevans/konduite`, titled `<EPIC>-<NNN>: <title>` (e.g. `MSG-004: Implement transactional outbox`). Find the issue number with `gh issue list -R iykeevans/konduite --search "MSG-004 in:title"`.
 - Epics are parent issues (`PLAT: Platform foundation`, …); tickets are their sub-issues. Milestones are `M0 Foundation` … `M5 Dashboard & Hardening`.
-- Board: "Konduite MVP" (user project #3). Status values: Backlog, Todo, In progress, In review, Done. To move a card, use `gh project item-edit` on the Status field.
+- Board: "Konduite MVP" (user project #3). Status values: Backlog, Todo, In progress, In review, Done. To move a card, use `gh project item-edit` on the Status field. Pushing the branch moves the ticket to In progress; opening its PR moves it to In review. `gh project` needs `--owner "@me"` here (`--owner iykeevans` fails with "unknown owner type").
 - Branch names: `<prefix><ticket-id lowercased>-<slug>`, e.g. `feat/msg-004-transactional-outbox`. PR bodies include `Closes #<issue>`.
 - The ticket manifest is `scripts/github/tickets.json`. Edit it and re-run `python3 scripts/github/bootstrap.py`, which is idempotent, to add tickets.
 
