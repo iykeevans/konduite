@@ -76,7 +76,7 @@ func TestReadyzPassesWhenAllChecksPass(t *testing.T) {
 }
 
 func TestUnknownRouteReturnsNotFoundEnvelope(t *testing.T) {
-	rec, body := get(t, api.NewRouter(api.Deps{}), "/api/v1/nope")
+	rec, body := get(t, api.NewRouter(api.Deps{Authenticate: allowAll}), "/api/v1/nope")
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", rec.Code)
@@ -88,7 +88,7 @@ func TestUnknownRouteReturnsNotFoundEnvelope(t *testing.T) {
 }
 
 func TestPanicReturnsInternalErrorWithoutLeaking(t *testing.T) {
-	deps := api.Deps{Routes: []func(chi.Router){
+	deps := api.Deps{Authenticate: allowAll, Routes: []func(chi.Router){
 		func(r chi.Router) {
 			r.Get("/boom", func(http.ResponseWriter, *http.Request) { panic("secret: db password is hunter2") })
 		},
@@ -104,5 +104,63 @@ func TestPanicReturnsInternalErrorWithoutLeaking(t *testing.T) {
 	}
 	if strings.Contains(rec.Body.String(), "hunter2") {
 		t.Errorf("response leaks panic value: %s", rec.Body.String())
+	}
+}
+
+func allowAll(next http.Handler) http.Handler { return next }
+
+func TestAPIRoutesGoThroughAuthenticationButHealthChecksDoNot(t *testing.T) {
+	deny := func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"code":"unauthenticated"}}`))
+		})
+	}
+	deps := api.Deps{Authenticate: deny, Routes: []func(chi.Router){
+		func(r chi.Router) {
+			r.Get("/secret", func(http.ResponseWriter, *http.Request) { t.Error("handler ran") })
+		},
+	}}
+	h := api.NewRouter(deps)
+
+	for _, path := range []string{"/api/v1/secret", "/api/v1/nope"} {
+		if rec, _ := get(t, h, path); rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s: status = %d, want 401", path, rec.Code)
+		}
+	}
+	if rec, _ := get(t, h, "/healthz"); rec.Code != http.StatusOK {
+		t.Errorf("/healthz: status = %d, want 200 without credentials", rec.Code)
+	}
+}
+
+func TestAPIRoutesFailClosedWhenNoAuthenticatorIsWired(t *testing.T) {
+	deps := api.Deps{Routes: []func(chi.Router){
+		func(r chi.Router) {
+			r.Get("/secret", func(http.ResponseWriter, *http.Request) { t.Error("handler ran") })
+		},
+	}}
+	rec, body := get(t, api.NewRouter(deps), "/api/v1/secret")
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", rec.Code)
+	}
+	if e, _ := body["error"].(map[string]any); e["code"] != "unauthenticated" {
+		t.Errorf("error = %v, want unauthenticated", body["error"])
+	}
+}
+
+func TestAPIRoutesRequireAuthenticationEvenBeforeAnyDomainMountsRoutes(t *testing.T) {
+	ran := false
+	authenticate := func(http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			ran = true
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"error":{"code":"unauthenticated"}}`))
+		})
+	}
+	rec, _ := get(t, api.NewRouter(api.Deps{Authenticate: authenticate}), "/api/v1/workspaces")
+	if rec.Code != http.StatusUnauthorized || !ran {
+		t.Errorf("status = %d, authenticator ran = %v; want 401 from the authenticator", rec.Code, ran)
 	}
 }

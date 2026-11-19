@@ -13,6 +13,9 @@ import (
 type Deps struct {
 	// ReadinessChecks are run by /readyz, keyed by dependency name.
 	ReadinessChecks map[string]Check
+	// Authenticate guards every /api/v1 route. When nil, /api/v1 rejects all
+	// requests, so forgetting to wire it can never leave the API open.
+	Authenticate func(http.Handler) http.Handler
 	// Routes are mounted under /api/v1, one func per domain.
 	Routes []func(chi.Router)
 }
@@ -23,13 +26,29 @@ func NewRouter(deps Deps) http.Handler {
 	r.Use(recoverer)
 	r.Get("/healthz", healthz)
 	r.Get("/readyz", readyz(deps.ReadinessChecks))
-	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
-		httpx.Fail(w, http.StatusNotFound, "not_found", "route not found", nil)
-	})
-	r.Route("/api/v1", func(v1 chi.Router) {
-		for _, mount := range deps.Routes {
-			mount(v1)
-		}
-	})
+	r.NotFound(notFound)
+	authenticate := deps.Authenticate
+	if authenticate == nil {
+		authenticate = denyAll
+	}
+	// Wrap the whole subrouter rather than calling v1.Use: chi skips a
+	// subrouter's middleware while it has no routes, which would leave
+	// /api/v1 unauthenticated until the first domain mounts one.
+	v1 := chi.NewRouter()
+	v1.NotFound(notFound)
+	for _, mount := range deps.Routes {
+		mount(v1)
+	}
+	r.Mount("/api/v1", authenticate(v1))
 	return r
+}
+
+func denyAll(http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		httpx.Fail(w, http.StatusUnauthorized, "unauthenticated", "authentication is not configured", nil)
+	})
+}
+
+func notFound(w http.ResponseWriter, _ *http.Request) {
+	httpx.Fail(w, http.StatusNotFound, "not_found", "route not found", nil)
 }

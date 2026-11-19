@@ -7,12 +7,21 @@ info:
     List endpoints add `"meta": {"next_cursor", "has_more"}`. Failures are
     `{"error": {"code", "message", "details"}}`. Domain errors map to statuses
     in one place (backend/internal/platform/httpx/error.go).
+
+    Every /api/v1 route requires a Supabase access token sent as
+    `Authorization: Bearer <token>`. A missing, malformed, expired or
+    wrongly signed token returns 401 `unauthenticated`. If the signing keys
+    cannot be fetched from Supabase the request fails with 500 `internal`,
+    not 401, so clients do not sign users out during an auth outage.
 servers:
   - url: http://localhost:8080
+security:
+  - bearerAuth: []
 paths:
   /healthz:
     get:
       summary: Liveness. The process is up.
+      security: []
       responses:
         "200":
           description: Alive
@@ -23,6 +32,7 @@ paths:
   /readyz:
     get:
       summary: Readiness. Every dependency check passes.
+      security: []
       responses:
         "200":
           description: Ready
@@ -37,6 +47,22 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Supabase access token, verified against the project's JWKS (ES256 or RS256).
+  responses:
+    Unauthenticated:
+      description: Missing, malformed, expired or invalid access token.
+      headers:
+        WWW-Authenticate:
+          schema: { type: string, example: Bearer }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
   parameters:
     Limit:
       name: limit
