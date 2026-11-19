@@ -17,6 +17,23 @@ services:
       timeout: 3s
       retries: 10
 
+  # One-shot: creates or updates the JetStream streams from the same Go
+  # definitions the worker uses, so compose and code cannot drift.
+  nats-bootstrap:
+    image: golang:1.27-alpine
+    working_dir: /src/backend
+    command: ["go", "run", "./cmd/natsbootstrap"]
+    environment:
+      NATS_URL: nats://nats:4222
+    volumes:
+      - .:/src:ro
+      - go-cache:/go/pkg/mod
+      - go-build-cache:/root/.cache/go-build
+    depends_on:
+      nats:
+        condition: service_healthy
+    restart: "no"
+
   otel-collector:
     image: otel/opentelemetry-collector-contrib:0.130.0
     command: ["--config=/etc/otelcol/config.yaml"]
@@ -35,3 +52,5 @@ services:
 
 volumes:
   nats-data:
+  go-cache:
+  go-build-cache:
