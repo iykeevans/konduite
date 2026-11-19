@@ -14,13 +14,16 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
+	"github.com/iykeevans/konduite/backend/internal/authz"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
 	"github.com/iykeevans/konduite/backend/internal/runtimes"
+	"github.com/iykeevans/konduite/backend/internal/store"
 )
 
 func main() {
@@ -53,10 +56,12 @@ func run() error {
 		}
 		slog.Warn("RUNTIME_TOKEN_SIGNING_KEY not set: signing runtime tokens with a throwaway key, so they stop working on restart")
 	}
-	// TODO(SEC-001): replace InterimMembershipCheck with
-	// func(ctx context.Context, p auth.Principal, ws uuid.UUID) error { return az.Can(ctx, p, authz.ActionRegisterRuntime, authz.Workspace(ws)) }
+	az := authz.New(authz.StoreMemberships(store.New(pool)))
+	canRegister := func(ctx context.Context, p auth.Principal, ws uuid.UUID) error {
+		return az.Can(ctx, p, authz.ActionRegisterRuntime, authz.Workspace(ws))
+	}
 	runtimeHandler := runtimes.NewHandler(runtimes.NewService(
-		runtimes.NewPostgresRepository(pool), runtimes.InterimMembershipCheck(pool), tokenKey))
+		runtimes.NewPostgresRepository(pool), canRegister, tokenKey))
 
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{

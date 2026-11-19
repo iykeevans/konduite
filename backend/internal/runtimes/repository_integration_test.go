@@ -9,9 +9,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/iykeevans/konduite/backend/internal/auth"
 	"github.com/iykeevans/konduite/backend/internal/platform/dbtest"
-	"github.com/iykeevans/konduite/backend/internal/platform/errs"
 	"github.com/iykeevans/konduite/backend/internal/runtimes"
 )
 
@@ -78,33 +76,4 @@ func TestPostgresRepositoryStoresNothingWhenTheCredentialFails(t *testing.T) {
 	if runtimesLeft != 0 {
 		t.Errorf("%d runtimes stored without a credential, want 0", runtimesLeft)
 	}
-}
-
-func TestInterimMembershipCheck(t *testing.T) {
-	pool := dbtest.New(t)
-	ctx := t.Context()
-	var workspace uuid.UUID
-	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug, created_by) VALUES ('Acme', 'acme', $1) RETURNING id`,
-		uuid.New()).Scan(&workspace); err != nil {
-		t.Fatal(err)
-	}
-	member := func(role string) uuid.UUID {
-		id := uuid.New()
-		if _, err := pool.Exec(ctx, `INSERT INTO workspace_members (workspace_id, user_id, role) VALUES ($1, $2, $3)`,
-			workspace, id, role); err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	check := runtimes.InterimMembershipCheck(pool)
-	user := func(id uuid.UUID) auth.Principal { return auth.Principal{Kind: auth.KindUser, ID: id} }
-
-	for _, role := range []string{"owner", "admin", "developer"} {
-		if err := check(ctx, user(member(role)), workspace); err != nil {
-			t.Errorf("%s: err = %v, want allowed", role, err)
-		}
-	}
-	wantKind(t, check(ctx, user(member("project_manager")), workspace), errs.KindForbidden)
-	wantKind(t, check(ctx, user(uuid.New()), workspace), errs.KindNotFound)
-	wantKind(t, check(ctx, user(member("owner")), uuid.New()), errs.KindNotFound)
 }
