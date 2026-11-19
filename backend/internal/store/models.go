@@ -11,6 +11,28 @@ import (
 	"github.com/google/uuid"
 )
 
+type Agent struct {
+	ID           uuid.UUID
+	WorkspaceID  uuid.UUID
+	RuntimeID    uuid.UUID
+	Provider     string
+	Name         string
+	Version      *string
+	Capabilities json.RawMessage
+	Status       string
+	LastSeenAt   time.Time
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type AgentProjectAccess struct {
+	AgentID     uuid.UUID
+	ProjectID   uuid.UUID
+	WorkspaceID uuid.UUID
+	GrantedBy   uuid.UUID
+	GrantedAt   time.Time
+}
+
 type AgentRuntimeInstance struct {
 	ID          uuid.UUID
 	WorkspaceID uuid.UUID
@@ -30,6 +52,25 @@ type AuditLog struct {
 	ResourceID   *uuid.UUID
 	Metadata     json.RawMessage
 	CreatedAt    time.Time
+}
+
+type Conversation struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	ProjectID   *uuid.UUID
+	Title       string
+	CreatedBy   uuid.UUID
+	LastSeq     int64
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ConversationParticipant struct {
+	ID              uuid.UUID
+	ConversationID  uuid.UUID
+	ParticipantType string
+	ParticipantID   uuid.UUID
+	JoinedAt        time.Time
 }
 
 type InboundEvent struct {

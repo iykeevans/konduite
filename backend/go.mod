@@ -5,6 +5,7 @@ go 1.27
 require (
 	github.com/go-chi/chi/v5 v5.5.0
 	github.com/google/uuid v1.6.0
+	github.com/iykeevans/konduite/packages/contracts v0.0.0
 	github.com/jackc/pgx/v5 v5.13.0
 	github.com/lestrrat-go/jwx/v3 v3.4.0
 	github.com/nats-io/nats.go v1.56.0
@@ -84,3 +85,5 @@ require (
 	golang.org/x/sys v0.50.0 // indirect
 	golang.org/x/text v0.44.0 // indirect
 )
+
+replace github.com/iykeevans/konduite/packages/contracts => ../packages/contracts
