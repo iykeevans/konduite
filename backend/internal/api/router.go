@@ -7,6 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/iykeevans/konduite/backend/internal/platform/httpx"
+	"github.com/iykeevans/konduite/backend/internal/platform/log"
 )
 
 // Deps are the collaborators the router needs.
@@ -27,7 +28,7 @@ type Deps struct {
 // NewRouter returns the API's root handler.
 func NewRouter(deps Deps) http.Handler {
 	r := chi.NewRouter()
-	r.Use(recoverer)
+	r.Use(log.Middleware, recoverer)
 	r.Get("/healthz", healthz)
 	r.Get("/readyz", readyz(deps.ReadinessChecks))
 	r.NotFound(notFound)

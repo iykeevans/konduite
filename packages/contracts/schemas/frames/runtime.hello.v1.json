@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/frames/runtime.hello.v1.json",
+  "title": "RuntimeHello",
+  "description": "First frame a runtime sends after connecting; the server closes the socket if it does not arrive within 5s. Announces the local agents the runtime's adapters detected.",
+  "type": "object",
+  "required": ["runtime_version", "agents"],
+  "additionalProperties": false,
+  "properties": {
+    "runtime_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "agents": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/announced_agent" }
+    }
+  },
+  "$defs": {
+    "announced_agent": {
+      "title": "AnnouncedAgent",
+      "type": "object",
+      "required": ["provider", "name"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "description": "Adapter that runs the agent, e.g. claude_code, codex, echo.",
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "maxLength": 64
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "version": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "capabilities": { "$ref": "#/$defs/agent_capabilities" }
+      }
+    },
+    "agent_capabilities": {
+      "title": "AgentCapabilities",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "supports_resume": { "type": "boolean" },
+        "supports_cancel": { "type": "boolean" },
+        "supports_streaming": { "type": "boolean" },
+        "session_scope": { "type": "string", "maxLength": 64 }
+      }
+    }
+  }
+}

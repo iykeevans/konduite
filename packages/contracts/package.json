@@ -1,0 +1,17 @@
+{
+  "name": "@konduite/contracts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./ts/index.ts"
+  },
+  "scripts": {
+    "generate": "node scripts/gen-ts.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "5.9.3"
+  }
+}

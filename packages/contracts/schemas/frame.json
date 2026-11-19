@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/frame.json",
+  "title": "Frame",
+  "description": "A WebSocket frame between a runtime and the API. It carries no tenant fields: the server takes the runtime, workspace and user from the runtime's credential.",
+  "type": "object",
+  "required": ["id", "type", "version", "sent_at", "data"],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "description": "Frame id. Acks and dedupe refer to it.",
+      "type": "string",
+      "format": "uuid"
+    },
+    "type": {
+      "description": "Dotted frame name, e.g. runtime.hello. Selects the payload schema in frames/.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$"
+    },
+    "version": {
+      "description": "Payload schema version for this type.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "sent_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "correlation_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "data": {
+      "description": "Payload, validated against frames/<type>.v<version>.json.",
+      "type": "object",
+      "goJSONSchema": { "type": "json.RawMessage", "imports": ["encoding/json"] },
+      "tsType": "Record<string, unknown>"
+    }
+  }
+}
