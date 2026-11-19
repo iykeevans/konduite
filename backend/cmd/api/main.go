@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iykeevans/konduite/backend/internal/api"
+	"github.com/iykeevans/konduite/backend/internal/auth"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
@@ -43,6 +44,7 @@ func run() error {
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
+			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,

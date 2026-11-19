@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"time"
 )
 
@@ -13,6 +14,7 @@ type Config struct {
 	HTTPAddr        string        // API_ADDR
 	ShutdownTimeout time.Duration // API_SHUTDOWN_TIMEOUT
 	DatabaseURL     string        // DATABASE_URL (required)
+	SupabaseURL     string        // SUPABASE_URL (required): project URL, gives the JWKS and token issuer
 
 	WorkerDrainTimeout time.Duration // WORKER_DRAIN_TIMEOUT
 }
@@ -32,9 +34,13 @@ func Load(getenv func(string) string) (Config, error) {
 		Env:         or("APP_ENV", "development"),
 		HTTPAddr:    or("API_ADDR", ":8080"),
 		DatabaseURL: getenv("DATABASE_URL"),
+		SupabaseURL: getenv("SUPABASE_URL"),
 	}
 	if c.DatabaseURL == "" {
 		problems = append(problems, fmt.Errorf("DATABASE_URL: required (local Supabase: postgresql://postgres:postgres@127.0.0.1:54322/postgres)"))
+	}
+	if u, err := url.Parse(c.SupabaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		problems = append(problems, fmt.Errorf("SUPABASE_URL: required, an http(s) URL such as http://127.0.0.1:54321 (local Supabase)"))
 	}
 	switch c.Env {
 	case "development", "test", "production":
