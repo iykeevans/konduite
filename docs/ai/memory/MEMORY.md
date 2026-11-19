@@ -6,3 +6,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [User ids have no FK to auth.users](user-ids-have-no-auth-fk.md) — user id columns are plain uuids so migrations run on vanilla Postgres; take ids only from the JWT principal.
 - [Supabase token verification](supabase-token-verification.md) — JWKS/ES256 checks, outage is 500 not 401, why /api/v1 is wrapped not `Use`d.
 - [Workspace authorization](workspace-authorization.md) — authz.Can is the one check; non-members get 404 not 403; role x action matrix; build Resource from server-owned ids.
+- [Runtime CLI authentication](runtime-cli-auth.md) — agenthub login/logout: loopback PKCE, only the runtime credential in the keychain, logout revokes then clears even on failure.
