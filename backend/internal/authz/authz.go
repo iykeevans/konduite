@@ -7,13 +7,14 @@
 //   - Call Can before reading or changing anything in the workspace, and
 //     before revealing whether the target exists.
 //   - Build the Resource from data the server owns: the workspace id in the
-//     URL for workspace routes, or the workspace_id of the stored row for
-//     anything inside a workspace. Never from a request body or message
-//     content.
+//     URL for workspace routes, the project id in the URL for project routes,
+//     or the workspace_id or project_id of the stored row for anything inside
+//     them. Never from a request body or message content.
 //   - Pass the error to httpx.Error unchanged. A non-member gets the same 404
-//     as a missing workspace, so the response never reveals that a workspace
-//     exists. A member without the role gets 403. A failed lookup is a 500.
-//   - When the workspace check passes but the row itself is missing, return
+//     as a missing workspace or project, so the response never reveals that
+//     one exists. A member without the role gets 403. A failed lookup is a
+//     500.
+//   - When the check passes but the row itself is missing, return
 //     errs.NotFound as usual.
 package authz
 
@@ -75,9 +76,11 @@ var allowed = map[Action][]Role{
 	ActionCreateConversation: everyone,
 }
 
-// Resource is what an action targets. Build it with Workspace.
+// Resource is what an action targets. Build it with Workspace or Project.
+// When both ids are set, the project must belong to that workspace.
 type Resource struct {
 	WorkspaceID uuid.UUID
+	ProjectID   uuid.UUID
 }
 
 // Workspace returns the resource for workspace id.
@@ -95,23 +98,33 @@ type Memberships interface {
 // Authorizer answers authorization questions. It is safe for concurrent use.
 type Authorizer struct {
 	members Memberships
+	grants  map[auth.Kind]Grants
 }
 
-// New returns an Authorizer that reads roles from members.
-func New(members Memberships) *Authorizer {
-	return &Authorizer{members: members}
+// New returns an Authorizer that reads roles from members. Project resources
+// need members to also implement ProjectMemberships.
+func New(members Memberships, opts ...Option) *Authorizer {
+	a := &Authorizer{members: members, grants: map[auth.Kind]Grants{}}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Can returns nil if p may perform action on r. Otherwise it returns
 // errs.NotFound when p cannot see the workspace, errs.Forbidden when p can
 // see it but lacks the role, errs.Unauthenticated for an empty principal, or
-// a plain error (a 500) when the lookup fails or r has no workspace.
+// a plain error (a 500) when the lookup fails or r has no workspace or
+// project.
 func (a *Authorizer) Can(ctx context.Context, p auth.Principal, action Action, r Resource) error {
-	if r.WorkspaceID == uuid.Nil {
+	if r.WorkspaceID == uuid.Nil && r.ProjectID == uuid.Nil {
 		return errors.New("authz: resource has no workspace id")
 	}
 	if p.ID == uuid.Nil {
 		return errs.Unauthenticated("authentication required")
+	}
+	if r.ProjectID != uuid.Nil {
+		return a.canProject(ctx, p, action, r)
 	}
 	if p.Kind != auth.KindUser {
 		return notFound()
@@ -130,7 +143,9 @@ func (a *Authorizer) Can(ctx context.Context, p auth.Principal, action Action, r
 			return nil
 		}
 	}
-	return errs.Forbidden("you do not have permission to do this")
+	return forbidden()
 }
 
 func notFound() error { return errs.NotFound("workspace not found") }
+
+func forbidden() error { return errs.Forbidden("you do not have permission to do this") }
