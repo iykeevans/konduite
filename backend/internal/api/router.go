@@ -18,6 +18,10 @@ type Deps struct {
 	Authenticate func(http.Handler) http.Handler
 	// Routes are mounted under /api/v1, one func per domain.
 	Routes []func(chi.Router)
+	// PublicRoutes are mounted at the root with no user authentication.
+	// Only routes that authenticate the caller themselves belong here, such
+	// as the runtime token exchange, which takes a refresh credential.
+	PublicRoutes []func(chi.Router)
 }
 
 // NewRouter returns the API's root handler.
@@ -40,6 +44,9 @@ func NewRouter(deps Deps) http.Handler {
 		mount(v1)
 	}
 	r.Mount("/api/v1", authenticate(v1))
+	for _, mount := range deps.PublicRoutes {
+		mount(r)
+	}
 	return r
 }
 

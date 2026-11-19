@@ -134,6 +134,20 @@ func TestAPIRoutesGoThroughAuthenticationButHealthChecksDoNot(t *testing.T) {
 	}
 }
 
+func TestPublicRoutesSkipUserAuthentication(t *testing.T) {
+	deps := api.Deps{PublicRoutes: []func(chi.Router){
+		func(r chi.Router) {
+			r.Get("/v1/runtime/ping", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(`{"data":{}}`))
+			})
+		},
+	}}
+	if rec, _ := get(t, api.NewRouter(deps), "/v1/runtime/ping"); rec.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200 without a user token", rec.Code)
+	}
+}
+
 func TestAPIRoutesFailClosedWhenNoAuthenticatorIsWired(t *testing.T) {
 	deps := api.Deps{Routes: []func(chi.Router){
 		func(r chi.Router) {
