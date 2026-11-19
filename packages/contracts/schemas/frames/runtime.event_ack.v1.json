@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/frames/runtime.event_ack.v1.json",
+  "title": "RuntimeEventAck",
+  "description": "Receipt ack. The runtime sends it only after it has durably recorded the event locally; it says nothing about execution.",
+  "type": "object",
+  "required": ["event_id"],
+  "additionalProperties": false,
+  "properties": {
+    "event_id": {
+      "description": "Id of the frame being acknowledged.",
+      "type": "string",
+      "format": "uuid"
+    }
+  }
+}

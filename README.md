@@ -58,6 +58,10 @@ Integration tests don't use it. `make test-integration` starts a throwaway `post
 | Postgres (Supabase) | `postgresql://postgres:postgres@127.0.0.1:54322/postgres` |
 | Supabase Studio | http://localhost:54323 |
 
+### Contracts
+
+WebSocket frames and NATS events are defined as JSON Schema in `packages/contracts/schemas`. `frame.json` is the WebSocket frame and `envelope.json` the NATS event; each payload is its own file, `frames/<type>.v<version>.json` or `events/<type>.v<version>.json`. `make contracts` regenerates the Go structs (`packages/contracts/types.gen.go`) and the TS types (`packages/contracts/ts`, imported as `@konduite/contracts`). Commit the generated code; CI runs `make contracts-check` and fails if it is stale. Validate every incoming frame or event with `validate.Frame` / `validate.Event` (`packages/contracts/validate`) before acting on it: an unknown type or version is rejected with `validate.ErrUnknownType`.
+
 ## Regenerating the project board
 
 ```bash

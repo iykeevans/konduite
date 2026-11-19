@@ -46,6 +46,16 @@ jobs:
           cache-dependency-path: tools/go.sum
       - name: sqlc output is up to date
         run: make sqlc-check
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --filter @konduite/contracts
+      - name: Contract types are up to date
+        run: make contracts-check
+      - name: Contract TS types compile
+        run: pnpm --filter @konduite/contracts typecheck
 
   web:
     runs-on: ubuntu-latest

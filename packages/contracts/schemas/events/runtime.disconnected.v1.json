@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/events/runtime.disconnected.v1.json",
+  "title": "RuntimeDisconnected",
+  "description": "A runtime went offline: its socket closed, its heartbeat timed out, or its credential was revoked.",
+  "type": "object",
+  "required": ["runtime_id", "reason"],
+  "additionalProperties": false,
+  "properties": {
+    "runtime_id": { "type": "string", "format": "uuid" },
+    "reason": {
+      "type": "string",
+      "enum": ["closed", "heartbeat_timeout", "revoked"]
+    }
+  }
+}
