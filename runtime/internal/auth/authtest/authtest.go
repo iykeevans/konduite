@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -173,7 +174,8 @@ func (s *Supabase) token(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// Server fakes the Konduite API's runtime registration and revocation.
+// Server fakes the Konduite API's runtime registration, token exchange,
+// self lookup and revocation.
 type Server struct {
 	*httptest.Server
 	UserToken   string
@@ -184,6 +186,7 @@ type Server struct {
 	mu      sync.Mutex
 	names   []string
 	revoked []string
+	tokens  []string
 	urls    []string
 }
 
@@ -199,6 +202,8 @@ func NewServer(t *testing.T, userToken string) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/runtimes/register", s.register)
 	mux.HandleFunc("POST /v1/runtime/revoke", s.revoke)
+	mux.HandleFunc("POST /v1/runtime/token", s.token)
+	mux.HandleFunc("GET /v1/runtime/self", s.self)
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.urls = append(s.urls, r.URL.String())
@@ -221,6 +226,20 @@ func (s *Server) Revoked() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.revoked...)
+}
+
+// AccessTokens returns the runtime access tokens issued so far.
+func (s *Server) AccessTokens() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.tokens...)
+}
+
+// RevokeAll revokes the credential server-side, as the dashboard would.
+func (s *Server) RevokeAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.revoked = append(s.revoked, s.Credential)
 }
 
 // URLs returns every request URL the fake has seen.
@@ -278,6 +297,46 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	s.revoked = append(s.revoked, body.RefreshCredential)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) token(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		RefreshCredential string `json:"refresh_credential"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.RefreshCredential == "" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid", "refresh_credential is required in the request body")
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if body.RefreshCredential != s.Credential || slices.Contains(s.revoked, body.RefreshCredential) {
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid refresh credential")
+		return
+	}
+	tok := "rat." + random()
+	s.tokens = append(s.tokens, tok)
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{
+		"access_token": tok, "token_type": "Bearer", "expires_in": 900, "expires_at": "2026-11-19T00:15:00Z",
+	}})
+}
+
+func (s *Server) self(w http.ResponseWriter, r *http.Request) {
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if tok == "" || !slices.Contains(s.tokens, tok) {
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid runtime access token")
+		return
+	}
+	name := ""
+	if len(s.names) > 0 {
+		name = s.names[len(s.names)-1]
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": map[string]any{ //nolint:gosec // credential_last_used_at is a timestamp field name, not a secret
+		"id": s.RuntimeID, "workspace_id": s.WorkspaceID, "owner_id": "user-1", "name": name,
+		"revoked": slices.Contains(s.revoked, s.Credential), "credential_last_used_at": "2026-11-19T00:00:00Z",
+		"created_at": "2026-11-19T00:00:00Z", "updated_at": "2026-11-19T00:00:00Z",
+	}})
 }
 
 // Browser returns an opener that visits the URL like a browser whose user

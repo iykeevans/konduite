@@ -48,6 +48,7 @@ func TestCanRoleByAction(t *testing.T) {
 		{authz.ActionViewProjects, [4]errs.Kind{allow, allow, allow, allow}},
 		{authz.ActionCreateProject, [4]errs.Kind{allow, allow, forbid, allow}},
 		{authz.ActionRegisterRuntime, [4]errs.Kind{allow, allow, allow, forbid}},
+		{authz.ActionViewRuntimes, [4]errs.Kind{allow, allow, allow, allow}},
 		{authz.ActionViewAuditLog, [4]errs.Kind{allow, allow, forbid, forbid}},
 		{authz.ActionViewConversations, [4]errs.Kind{allow, allow, allow, allow}},
 		{authz.ActionCreateConversation, [4]errs.Kind{allow, allow, allow, allow}},

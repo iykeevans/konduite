@@ -21,6 +21,42 @@ func (q *Queries) DeleteRuntimeCredential(ctx context.Context, id uuid.UUID) err
 	return err
 }
 
+const getRuntime = `-- name: GetRuntime :one
+SELECT r.id, r.workspace_id, r.owner_id, r.name, r.created_at, r.updated_at,
+       c.last_used_at AS credential_last_used_at,
+       (c.id IS NULL)::boolean AS revoked
+FROM agent_runtime_instances r
+LEFT JOIN runtime_credentials c ON c.runtime_id = r.id
+WHERE r.id = $1
+`
+
+type GetRuntimeRow struct {
+	ID                   uuid.UUID
+	WorkspaceID          uuid.UUID
+	OwnerID              uuid.UUID
+	Name                 string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CredentialLastUsedAt *time.Time
+	Revoked              bool
+}
+
+func (q *Queries) GetRuntime(ctx context.Context, id uuid.UUID) (GetRuntimeRow, error) {
+	row := q.db.QueryRow(ctx, getRuntime, id)
+	var i GetRuntimeRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.OwnerID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CredentialLastUsedAt,
+		&i.Revoked,
+	)
+	return i, err
+}
+
 const getRuntimeCredential = `-- name: GetRuntimeCredential :one
 SELECT c.id, c.secret_hash, r.id AS runtime_id, r.workspace_id, r.owner_id
 FROM runtime_credentials c
@@ -97,6 +133,71 @@ func (q *Queries) InsertRuntimeCredential(ctx context.Context, arg InsertRuntime
 	var i InsertRuntimeCredentialRow
 	err := row.Scan(&i.ID, &i.RuntimeID, &i.CreatedAt)
 	return i, err
+}
+
+const listRuntimes = `-- name: ListRuntimes :many
+SELECT r.id, r.workspace_id, r.owner_id, r.name, r.created_at, r.updated_at,
+       c.last_used_at AS credential_last_used_at,
+       (c.id IS NULL)::boolean AS revoked
+FROM agent_runtime_instances r
+LEFT JOIN runtime_credentials c ON c.runtime_id = r.id
+WHERE r.workspace_id = $1
+  AND ($2::timestamptz IS NULL
+       OR (r.created_at, r.id) < ($2::timestamptz, $3::uuid))
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT $4
+`
+
+type ListRuntimesParams struct {
+	WorkspaceID    uuid.UUID
+	AfterCreatedAt *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
+}
+
+type ListRuntimesRow struct {
+	ID                   uuid.UUID
+	WorkspaceID          uuid.UUID
+	OwnerID              uuid.UUID
+	Name                 string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CredentialLastUsedAt *time.Time
+	Revoked              bool
+}
+
+func (q *Queries) ListRuntimes(ctx context.Context, arg ListRuntimesParams) ([]ListRuntimesRow, error) {
+	rows, err := q.db.Query(ctx, listRuntimes,
+		arg.WorkspaceID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRuntimesRow{}
+	for rows.Next() {
+		var i ListRuntimesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.OwnerID,
+			&i.Name,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CredentialLastUsedAt,
+			&i.Revoked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchRuntimeCredential = `-- name: TouchRuntimeCredential :exec

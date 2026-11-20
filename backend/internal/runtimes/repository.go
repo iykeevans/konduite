@@ -40,7 +40,36 @@ func (r postgresRepository) Create(ctx context.Context, n NewRuntime) (Runtime, 
 	if err != nil {
 		return Runtime{}, uuid.Nil, err
 	}
-	return Runtime{ID: rt.ID, WorkspaceID: rt.WorkspaceID, OwnerID: rt.OwnerID, Name: rt.Name, CreatedAt: rt.CreatedAt}, credID, nil
+	return Runtime{
+		ID: rt.ID, WorkspaceID: rt.WorkspaceID, OwnerID: rt.OwnerID, Name: rt.Name, CreatedAt: rt.CreatedAt, UpdatedAt: rt.UpdatedAt,
+	}, credID, nil
+}
+
+func (r postgresRepository) Get(ctx context.Context, id uuid.UUID) (Runtime, error) {
+	row, err := store.New(r.pool).GetRuntime(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Runtime{}, ErrNotFound
+	}
+	if err != nil {
+		return Runtime{}, err
+	}
+	return Runtime(row), nil
+}
+
+func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Runtime, error) {
+	params := store.ListRuntimesParams{WorkspaceID: f.WorkspaceID, RowLimit: int32(f.Limit)} //nolint:gosec // Limit is at most 101, set by the service.
+	if f.After != nil {
+		params.AfterCreatedAt, params.AfterID = &f.After.CreatedAt, &f.After.ID
+	}
+	rows, err := store.New(r.pool).ListRuntimes(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Runtime, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, Runtime(row))
+	}
+	return out, nil
 }
 
 func (r postgresRepository) Credential(ctx context.Context, id uuid.UUID) (Credential, error) {

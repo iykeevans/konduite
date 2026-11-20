@@ -110,21 +110,59 @@ func (s server) revoke(ctx context.Context, refreshCredential string) error {
 		map[string]string{"refresh_credential": refreshCredential}, nil)
 }
 
-// send POSTs body as JSON and decodes a 2xx response into out. Transport
-// errors are reduced to their cause so a request body can never leak.
-func send(ctx context.Context, hc *http.Client, target string, h http.Header, body, out any) error {
-	data, err := json.Marshal(body)
-	if err != nil {
-		return err
+func (s server) accessToken(ctx context.Context, refreshCredential string) (string, error) {
+	var out struct {
+		Data struct {
+			AccessToken string `json:"access_token"`
+		} `json:"data"`
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(data))
+	err := send(ctx, s.http, s.url+"/v1/runtime/token", nil,
+		map[string]string{"refresh_credential": refreshCredential}, &out)
+	if err != nil {
+		return "", err
+	}
+	if out.Data.AccessToken == "" {
+		return "", errors.New("server returned no runtime access token")
+	}
+	return out.Data.AccessToken, nil
+}
+
+func (s server) self(ctx context.Context, accessToken string) (RemoteRuntime, error) {
+	var out struct {
+		Data RemoteRuntime `json:"data"`
+	}
+	err := do(ctx, s.http, http.MethodGet, s.url+"/v1/runtime/self",
+		http.Header{"Authorization": {"Bearer " + accessToken}}, nil, &out)
+	return out.Data, err
+}
+
+// send POSTs body as JSON and decodes a 2xx response into out.
+func send(ctx context.Context, hc *http.Client, target string, h http.Header, body, out any) error {
+	return do(ctx, hc, http.MethodPost, target, h, body, out)
+}
+
+// do sends body (if not nil) as JSON and decodes a 2xx response into out.
+// Transport errors are reduced to their cause so a request body can never
+// leak.
+func do(ctx context.Context, hc *http.Client, method, target string, h http.Header, body, out any) error {
+	var payload io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		payload = bytes.NewReader(data)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, target, payload)
 	if err != nil {
 		return err
 	}
 	for k, v := range h {
 		req.Header[k] = v
 	}
-	req.Header.Set("Content-Type", "application/json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	req.Header.Set("Accept", "application/json")
 
 	resp, err := hc.Do(req)

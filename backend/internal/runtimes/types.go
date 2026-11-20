@@ -10,12 +10,13 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/iykeevans/konduite/backend/internal/auth"
+	"github.com/iykeevans/konduite/backend/internal/authz"
 )
 
-// AuthorizeRegister returns nil if p may register a runtime in workspaceID,
-// and an errs error (NotFound, Forbidden) to deny. Its error goes to the
-// client unchanged.
-type AuthorizeRegister func(ctx context.Context, p auth.Principal, workspaceID uuid.UUID) error
+// Authorizer is the authz.Authorizer method the service needs.
+type Authorizer interface {
+	Can(ctx context.Context, p auth.Principal, action authz.Action, r authz.Resource) error
+}
 
 // RegisterInput is what a user supplies to register a runtime.
 type RegisterInput struct {
@@ -56,13 +57,46 @@ type NewRuntime struct {
 	SecretHash  []byte
 }
 
-// Runtime is a stored runtime.
+// Runtime is a stored runtime. It never carries credential material: Revoked
+// says the runtime has no refresh credential left (it logged out or was
+// revoked), and CredentialLastUsedAt is the last token exchange, if any.
 type Runtime struct {
-	ID          uuid.UUID
+	ID                   uuid.UUID
+	WorkspaceID          uuid.UUID
+	OwnerID              uuid.UUID
+	Name                 string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	CredentialLastUsedAt *time.Time
+	Revoked              bool
+}
+
+// Position is where a page of runtimes ends: the last item's creation time
+// and id, in newest-first order.
+type Position struct {
+	CreatedAt time.Time `json:"t"`
+	ID        uuid.UUID `json:"id"`
+}
+
+// ListInput asks for a page of a workspace's runtimes, newest first.
+type ListInput struct {
 	WorkspaceID uuid.UUID
-	OwnerID     uuid.UUID
-	Name        string
-	CreatedAt   time.Time
+	Limit       int
+	After       *Position
+}
+
+// Page is one page of runtimes. Next is nil on the last page.
+type Page struct {
+	Items []Runtime
+	Next  *Position
+}
+
+// ListFilter selects at most Limit runtimes of a workspace, newest first,
+// strictly after After.
+type ListFilter struct {
+	WorkspaceID uuid.UUID
+	After       *Position
+	Limit       int
 }
 
 // Credential is a stored refresh credential with the runtime it belongs to.
@@ -74,14 +108,21 @@ type Credential struct {
 	SecretHash  []byte
 }
 
-// ErrCredentialNotFound is returned by Repository.Credential for an unknown id.
-var ErrCredentialNotFound = errors.New("runtimes: credential not found")
+var (
+	// ErrNotFound is returned by Repository.Get for an unknown runtime.
+	ErrNotFound = errors.New("runtimes: not found")
+	// ErrCredentialNotFound is returned by Repository.Credential for an
+	// unknown id.
+	ErrCredentialNotFound = errors.New("runtimes: credential not found")
+)
 
 // Repository stores runtimes and their credentials.
 type Repository interface {
 	// Create stores the runtime and its credential atomically and returns
 	// the runtime and the credential's id.
 	Create(ctx context.Context, n NewRuntime) (Runtime, uuid.UUID, error)
+	Get(ctx context.Context, id uuid.UUID) (Runtime, error)
+	List(ctx context.Context, f ListFilter) ([]Runtime, error)
 	Credential(ctx context.Context, id uuid.UUID) (Credential, error)
 	TouchCredential(ctx context.Context, id uuid.UUID) error
 	// DeleteCredential removes a credential. Deleting one that is already

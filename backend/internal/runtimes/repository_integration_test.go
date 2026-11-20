@@ -87,3 +87,78 @@ func TestPostgresRepositoryStoresNothingWhenTheCredentialFails(t *testing.T) {
 		t.Errorf("%d runtimes stored without a credential, want 0", runtimesLeft)
 	}
 }
+
+func TestPostgresRepositoryGetsAndListsRuntimesWithCredentialState(t *testing.T) {
+	pool := dbtest.New(t)
+	ctx := t.Context()
+	owner := uuid.New()
+	var workspace, other uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug, created_by) VALUES ('Acme', 'acme', $1) RETURNING id`,
+		owner).Scan(&workspace); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO workspaces (name, slug, created_by) VALUES ('Other', 'other', $1) RETURNING id`,
+		owner).Scan(&other); err != nil {
+		t.Fatal(err)
+	}
+	repo := runtimes.NewPostgresRepository(pool)
+	hash := bytes.Repeat([]byte{7}, 32)
+	var ids []uuid.UUID
+	var creds []uuid.UUID
+	for _, name := range []string{"a", "b", "c"} {
+		rt, credID, err := repo.Create(ctx, runtimes.NewRuntime{WorkspaceID: workspace, OwnerID: owner, Name: name, SecretHash: hash})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids, creds = append(ids, rt.ID), append(creds, credID)
+	}
+	if _, _, err := repo.Create(ctx, runtimes.NewRuntime{WorkspaceID: other, OwnerID: owner, Name: "x", SecretHash: hash}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_runtime_instances SET created_at = now() - make_interval(secs => $2) WHERE id = $1`,
+		ids[0], 30); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := repo.Get(ctx, ids[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ID != ids[1] || got.WorkspaceID != workspace || got.OwnerID != owner || got.Name != "b" ||
+		got.Revoked || got.CredentialLastUsedAt != nil || got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
+		t.Errorf("runtime = %+v, want b with an unused, live credential", got)
+	}
+	if err := repo.TouchCredential(ctx, creds[1]); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, ids[1]); got.CredentialLastUsedAt == nil {
+		t.Error("credential_last_used_at still null after a token exchange")
+	}
+	if err := repo.DeleteCredential(ctx, creds[1]); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, ids[1]); !got.Revoked {
+		t.Error("runtime not revoked after its credential was deleted")
+	}
+	if _, err := repo.Get(ctx, uuid.New()); !errors.Is(err, runtimes.ErrNotFound) {
+		t.Errorf("unknown runtime: err = %v, want ErrNotFound", err)
+	}
+
+	first, err := repo.List(ctx, runtimes.ListFilter{WorkspaceID: workspace, Limit: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 2 || first[1].ID == ids[0] {
+		t.Fatalf("first page = %+v, want the two newest runtimes", first)
+	}
+	last := first[len(first)-1]
+	rest, err := repo.List(ctx, runtimes.ListFilter{
+		WorkspaceID: workspace, Limit: 2, After: &runtimes.Position{CreatedAt: last.CreatedAt, ID: last.ID},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) != 1 || rest[0].ID != ids[0] {
+		t.Errorf("second page = %+v, want only the oldest runtime", rest)
+	}
+}

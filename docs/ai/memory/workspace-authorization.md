@@ -13,7 +13,7 @@ Decided in SEC-001 (#24) and SEC-002 (#25), 2026-11-19. Code: `backend/internal/
 - **Entry point:** `authz.NewWithProjects(authz.StoreMemberships(store.New(pool)))` builds an `*Authorizer`; every handler and worker calls `az.Can(ctx, principal, action, authz.Workspace(id))` before touching workspace data. The package lives in `internal/authz`, not `internal/auth` as the ticket text said, so the call site reads `authz.Can` as AGENTS.md mandates.
 - **Errors:** non-member, missing workspace and non-user principal all return the same `errs.NotFound("workspace not found")` (404). A member without the role gets `errs.Forbidden` (403). An empty principal is `Unauthenticated`. A failed lookup or a `Resource` with no workspace id is a plain error, so httpx turns it into a 500.
 - **Deny by default:** an action missing from the `allowed` table, or a role string the code doesn't know, is 403.
-- **Role matrix** (the `allowed` map in `authz.go`, mirrored in `TestCanRoleByAction`): everyone views the workspace, members and projects; owner+admin update the workspace, manage members and read the audit log; only owner deletes; owner+admin+project_manager create projects; owner+admin+developer register runtimes.
+- **Role matrix** (the `allowed` map in `authz.go`, mirrored in `TestCanRoleByAction`): everyone views the workspace, members and projects; owner+admin update the workspace, manage members and read the audit log; only owner deletes; owner+admin+project_manager create projects; owner+admin+developer register runtimes; everyone views runtimes (RT-003).
 
 **Why 404 for non-members:** a 403 would confirm the workspace exists, letting anyone probe ids. One message for every not-visible case keeps that true even if a handler logs or echoes it.
 

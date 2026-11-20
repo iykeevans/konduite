@@ -106,6 +106,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/runtimes:
+    get:
+      summary: List a workspace's runtimes, newest first.
+      description: |
+        Every workspace member sees every runtime in it. No credential
+        material is ever returned. Connection state arrives with RT-004; until
+        then `credential_last_used_at` (the last token exchange) is the best
+        sign of life.
+      parameters:
+        - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of runtimes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Runtime" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: The workspace does not exist or the caller is not a member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: workspace_id missing or not a UUID, or a bad limit or cursor (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/runtimes/{runtimeID}:
+    get:
+      summary: Get a runtime.
+      parameters:
+        - { name: runtimeID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The runtime.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Runtime" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such runtime, a malformed id, or a runtime in a workspace the caller is not a member of. All get the same response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/workspaces:
     post:
       summary: Create a workspace. The caller becomes its owner.
@@ -495,6 +557,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/runtime/self:
+    get:
+      summary: Get the runtime a runtime access token was issued to.
+      description: |
+        Used by `agenthub status`. Authenticated with a runtime access token
+        from /v1/runtime/token (not a Supabase token), so it sits outside
+        /api/v1. The token can only name its own runtime, so no workspace
+        role is checked.
+      security:
+        - runtimeAuth: []
+      responses:
+        "200":
+          description: "The runtime. Sent with `Cache-Control: no-store`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Runtime" }
+        "401":
+          description: Missing, malformed, expired or foreign access token, or its runtime no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /v1/runtime/revoke:
     post:
       summary: Revoke a runtime refresh credential.
@@ -536,6 +624,11 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Supabase access token, verified against the project's JWKS (ES256 or RS256).
+    runtimeAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Runtime access token from POST /v1/runtime/token (EdDSA, aud `konduite-runtime`).
   responses:
     Unauthenticated:
       description: Missing, malformed, expired or invalid access token.
@@ -610,6 +703,23 @@ components:
       properties:
         next_cursor: { type: string, description: Absent on the last page. }
         has_more: { type: boolean }
+    Runtime:
+      type: object
+      required: [id, workspace_id, owner_id, name, revoked, credential_last_used_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid, description: The user who registered it. }
+        name: { type: string }
+        revoked:
+          type: boolean
+          description: The runtime has no refresh credential left (logged out or revoked), so it cannot get new access tokens.
+        credential_last_used_at:
+          type: [string, "null"]
+          format: date-time
+          description: Last time the credential was exchanged for an access token; null if never.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     Conversation:
       type: object
       required: [id, workspace_id, project_id, title, created_by, last_seq, created_at, updated_at]
