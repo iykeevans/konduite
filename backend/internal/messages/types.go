@@ -76,9 +76,31 @@ var (
 	ErrParentNotFound = errors.New("messages: parent not found in conversation")
 )
 
+// Posting is a message a user posts, with the conversation's workspace and
+// project for its message.created event.
+type Posting struct {
+	Message     NewMessage
+	WorkspaceID uuid.UUID
+	ProjectID   *uuid.UUID
+}
+
+// ListFilter selects at most Limit messages of a conversation with a
+// sequence number above AfterSeq, in sequence order.
+type ListFilter struct {
+	ConversationID uuid.UUID
+	AfterSeq       int64
+	Limit          int
+}
+
 // Repository stores messages.
 type Repository interface {
 	// Append stores n in its own transaction; see AppendTx.
 	Append(ctx context.Context, n NewMessage) (m Message, created bool, err error)
+	// Post stores the message, adds its sender to the conversation's
+	// participants and enqueues message.created, all in one transaction that
+	// has committed when Post returns. A retry returns the original with
+	// created false and writes nothing.
+	Post(ctx context.Context, in Posting) (m Message, created bool, err error)
 	Get(ctx context.Context, id uuid.UUID) (Message, error)
+	List(ctx context.Context, f ListFilter) ([]Message, error)
 }
