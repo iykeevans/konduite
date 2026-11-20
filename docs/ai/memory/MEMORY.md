@@ -9,3 +9,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [Domain handler pattern](domain-handler-pattern.md) — handler/service/repository split (workspaces is the reference), routes by full path not r.Route, audit rows in the write tx.
 - [Agent identity](agent-identity.md) — agents keyed by (runtime_id, provider, name) from runtime.hello; unannounced go offline not deleted; composite workspace FKs.
 - [Runtime CLI authentication](runtime-cli-auth.md) — agenthub login/logout: loopback PKCE, only the runtime credential in the keychain, logout revokes then clears even on failure.
+- [Consumer retry and dead-letter](consumer-retry-and-dlq.md) — every consumer uses nats.Client.Consume; publish DLQ then Term; replay gets a new msg id; admin allow-list gate.
