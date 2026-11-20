@@ -238,6 +238,161 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/workspaces/{workspaceId}/projects:
+    parameters:
+      - name: workspaceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Create a project in a workspace. The caller becomes its maintainer.
+      description: |
+        Workspace owners, admins and project managers may create projects;
+        developers get 403. The project, the caller's `maintainer`
+        project membership and a `project.created` audit log entry are
+        written in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { $ref: "#/components/schemas/ProjectName" }
+                description: { $ref: "#/components/schemas/ProjectDescription" }
+                repository_url: { $ref: "#/components/schemas/RepositoryURL" }
+      responses:
+        "201":
+          description: Created. `Location` is the new project's URL.
+          headers:
+            Location:
+              schema: { type: string, example: /api/v1/projects/0b6f3c2a-1d4e-4f6b-8a9c-3e2d1f0a9b8c }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller's workspace role cannot create projects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "409":
+          description: The workspace already has a project with that name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, or name/description/repository_url invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: List the projects in a workspace the caller can view, ordered by name.
+      description: |
+        Workspace owners and admins see every project. Other members see only
+        the projects they have a project role in.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of projects.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          description: limit out of range or cursor malformed (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get a project the caller can view.
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+    patch:
+      summary: Change a project's name, description or repository URL.
+      description: |
+        Project maintainers and workspace owners/admins may update. Callers
+        who can view the project but not maintain it get 403. Send at least
+        one field; omitted fields are left unchanged and an empty
+        `repository_url` clears it. When something actually changes, a
+        `project.updated` audit log entry recording the old and new values is
+        written in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { $ref: "#/components/schemas/ProjectName" }
+                description: { $ref: "#/components/schemas/ProjectDescription" }
+                repository_url: { $ref: "#/components/schemas/RepositoryURL" }
+      responses:
+        "200":
+          description: The updated project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can view the project but cannot update it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+        "409":
+          description: The workspace already has a project with that name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed or empty body, or name/description/repository_url invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/conversations:
     post:
       summary: Start a conversation in a workspace.
@@ -446,6 +601,15 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    ProjectNotFound:
+      description: |
+        The project does not exist, the caller cannot view it (not a member
+        of its workspace, or a member with no role in it who is not an owner
+        or admin), or the id is not a UUID. All look the same.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
   parameters:
     Limit:
       name: limit
@@ -496,6 +660,42 @@ components:
       required: [data]
       properties:
         data: { $ref: "#/components/schemas/Workspace" }
+    ProjectName:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Unique within the workspace. Trimmed.
+    ProjectDescription:
+      type: string
+      maxLength: 2000
+      default: ""
+      description: Trimmed.
+    RepositoryURL:
+      type: string
+      maxLength: 500
+      description: |
+        An `https://`, `ssh://` or scp-like (`git@host:org/repo.git`) git URL
+        with a host and path. Credentials are rejected: no user info in
+        https URLs, no password in ssh URLs. No query or fragment. Empty means
+        none.
+      example: git@github.com:acme/konduite.git
+    Project:
+      type: object
+      required: [id, workspace_id, name, description, repository_url, created_by, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        repository_url: { type: [string, "null"] }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProjectEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Project" }
     PageMeta:
       type: object
       required: [has_more]

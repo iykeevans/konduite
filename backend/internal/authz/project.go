@@ -51,6 +51,11 @@ var projectAllowed = map[Action][]ProjectRole{
 // without a project_members row.
 var implicitMaintainers = []Role{RoleOwner, RoleAdmin}
 
+// ImplicitMaintainers returns the workspace roles that maintain, and so can
+// view, every project in the workspace. Queries that list visible projects
+// filter with it rather than calling Can per row.
+func ImplicitMaintainers() []Role { return slices.Clone(implicitMaintainers) }
+
 // Project returns the resource for project id. Can resolves the project's
 // workspace itself, so callers never pair a project with a workspace.
 func Project(id uuid.UUID) Resource { return Resource{ProjectID: id} }

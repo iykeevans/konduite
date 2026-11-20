@@ -3,7 +3,7 @@ name: workspace-authorization
 description: "How authz.Can decides for workspaces and projects, how workspace and project roles combine, the agent grants hook, and why non-members get 404: read before writing any handler or worker that touches workspace or project data"
 metadata:
   type: project
-  modified: 2026-11-19
+  modified: 2026-11-20
 ---
 
 # Workspace and project authorization
@@ -29,6 +29,7 @@ Decided in SEC-001 (#24) and SEC-002 (#25), 2026-11-19. Code: `backend/internal/
 - **Role combination:** workspace owner/admin implicitly maintain every project. Everyone else needs a `project_members` row (maintainer > contributor > viewer). A workspace member with no project row gets 403, not 404, because every member can already list projects. A project member who is no longer in the workspace gets 404: workspace membership is required.
 - **Matrix** (`projectAllowed`): all project roles view the project and its members; maintainer+contributor `project.contribute` (messages, tasks, blockers, decisions); only maintainer updates, deletes, manages members and manages agent access. Workspace actions checked on a `Project` resource use the workspace role; project actions on a `Workspace` resource are 403.
 - **Errors:** every not-visible project case returns `errs.NotFound("project not found")`.
+- **Project visibility in the API (PLAT-009, #19, 2026-11-20):** `GET /workspaces/{id}/projects` returns only projects the caller can view, filtered in SQL (`ListVisibleProjects`, using `authz.ImplicitMaintainers()`), never by calling `Can` per row. Because the list hides them, `projects.Service` turns the 403 that `Can` gives a workspace member with no project role into the same 404 on `GET`/`PATCH /projects/{id}`; a viewer/contributor who can see the project still gets 403 on `PATCH`. Creating a project adds the creator as `maintainer` in the same transaction.
 - **Wiring:** `New` finds project lookups by type-asserting `Memberships` to `ProjectMemberships`; `StoreMemberships` implements both, so `cmd/api` needed no change. Without it, project checks are a 500.
 - **Agent hook (for SEC-003):** `authz.New(m, authz.WithGrants(kind, g))` routes principals of `kind` on `Project` resources to `g.ProjectActions(ctx, principalID, projectID)`; return `authz.ErrNoGrant` for no grant (404). The principal may do exactly the returned actions (else 403) and still can't see `Workspace` resources. Kinds without a registered `Grants` stay 404. SEC-003 registers the agent kind backed by `agent_project_access`.
 
