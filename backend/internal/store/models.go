@@ -94,6 +94,20 @@ type Invitation struct {
 	CreatedAt   time.Time
 }
 
+type Message struct {
+	ID             uuid.UUID
+	ConversationID uuid.UUID
+	SequenceNumber int64
+	SenderType     string
+	SenderID       uuid.UUID
+	IdempotencyKey string
+	ParentID       *uuid.UUID
+	MessageType    string
+	Content        string
+	Metadata       json.RawMessage
+	CreatedAt      time.Time
+}
+
 type OutboxEvent struct {
 	ID          uuid.UUID
 	EventType   string

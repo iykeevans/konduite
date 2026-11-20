@@ -87,6 +87,50 @@ type Frame struct {
 	Version int `json:"version"`
 }
 
+// A message was stored in a conversation. Carries what routing needs, not the
+// content: consumers read the message by id, so untrusted text never travels on
+// the bus.
+type MessageCreated struct {
+	// ConversationID corresponds to the JSON schema field "conversation_id".
+	ConversationID string `json:"conversation_id"`
+
+	// MessageID corresponds to the JSON schema field "message_id".
+	MessageID string `json:"message_id"`
+
+	// MessageType corresponds to the JSON schema field "message_type".
+	MessageType MessageCreatedMessageType `json:"message_type"`
+
+	// ParentID corresponds to the JSON schema field "parent_id".
+	ParentID *string `json:"parent_id,omitempty,omitzero"`
+
+	// Sender corresponds to the JSON schema field "sender".
+	Sender MessageSender `json:"sender"`
+
+	// Position in the conversation, gapless from 1. Deliveries are pushed in this
+	// order.
+	SequenceNumber int `json:"sequence_number"`
+}
+
+type MessageCreatedMessageType string
+
+const MessageCreatedMessageTypeSystem MessageCreatedMessageType = "system"
+const MessageCreatedMessageTypeTask MessageCreatedMessageType = "task"
+const MessageCreatedMessageTypeText MessageCreatedMessageType = "text"
+
+type MessageCreatedSenderType string
+
+const MessageCreatedSenderTypeAgent MessageCreatedSenderType = "agent"
+const MessageCreatedSenderTypeRuntime MessageCreatedSenderType = "runtime"
+const MessageCreatedSenderTypeUser MessageCreatedSenderType = "user"
+
+type MessageSender struct {
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type MessageCreatedSenderType `json:"type"`
+}
+
 // A runtime completed its hello and is online.
 type RuntimeConnected struct {
 	// RuntimeID corresponds to the JSON schema field "runtime_id".
