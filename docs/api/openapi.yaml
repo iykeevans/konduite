@@ -168,6 +168,151 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/agents:
+    post:
+      summary: Register an agent on one of your runtimes before it connects.
+      description: |
+        Stores an offline agent on `runtime_id` under the same identity a
+        `runtime.hello` uses, (runtime, provider, name). When the runtime next
+        announces an agent with that provider and name, the hello takes over
+        this row (same id, grants kept), marks it online and overwrites its
+        version and capabilities; `display_name` and `description` are never
+        touched by a hello. Only the runtime's owner may register, and only
+        while their workspace role can manage agents (owner, admin,
+        developer). The workspace comes from the runtime, never the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentRegistration" }
+      responses:
+        "201":
+          description: Registered. `Location` is the agent's URL.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller does not own the runtime, or their role cannot manage agents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No such runtime, or one in a workspace the caller is not a member of.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The runtime already has an agent with this provider and name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          $ref: "#/components/responses/Invalid"
+    get:
+      summary: List a workspace's agents, newest first.
+      description: Every workspace member sees every agent in it.
+      parameters:
+        - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: runtime_id, in: query, required: false, schema: { type: string, format: uuid }, description: Only agents on this runtime. }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Agent" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          description: workspace_id missing, an id that is not a UUID, or a bad limit or cursor (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/agents/{agentID}:
+    parameters:
+      - { name: agentID, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      summary: Get an agent.
+      responses:
+        "200":
+          description: The agent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/AgentNotFound"
+    patch:
+      summary: Change an agent's display name or description.
+      description: |
+        Only the labels are editable: provider and name are the agent's
+        identity, and version, capabilities and status belong to the runtime.
+        An omitted field is left alone; an empty string clears it. Only the
+        owner of the agent's runtime may.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 128 }
+                description: { type: string, maxLength: 1000 }
+      responses:
+        "200":
+          description: The updated agent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller does not own the agent's runtime, or their role cannot manage agents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/AgentNotFound"
+        "422":
+          $ref: "#/components/responses/Invalid"
+    delete:
+      summary: Delete an agent and its project grants.
+      description: |
+        A hard delete: the agent's `agent_project_access` grants go with it.
+        A runtime that still announces the agent recreates it, with a new id
+        and no grants, on its next hello, so remove it from the runtime first.
+        Only the owner of the agent's runtime may.
+      responses:
+        "204":
+          description: Deleted.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller does not own the agent's runtime, or their role cannot manage agents.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/AgentNotFound"
   /api/v1/workspaces:
     post:
       summary: Create a workspace. The caller becomes its owner.
@@ -1374,6 +1519,64 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/runtime/agents:
+    post:
+      summary: Register an agent on the token's own runtime.
+      description: |
+        Used by `agenthub agents register`. Same as POST /api/v1/agents, but
+        authenticated with a runtime access token, and the runtime is always
+        the token's (a `runtime_id` in the body is ignored). The token is the
+        authorization: it can do no more than the runtime's own hello.
+      security:
+        - runtimeAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentRegistration" }
+      responses:
+        "201":
+          description: Registered.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEnvelope" }
+        "401":
+          description: Missing, malformed, expired or foreign access token, or its runtime no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The runtime already has an agent with this provider and name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          $ref: "#/components/responses/Invalid"
+    get:
+      summary: List the token's own runtime's agents, by provider then name.
+      description: Used by `agenthub agents list`. Not paginated; a runtime has few agents.
+      security:
+        - runtimeAuth: []
+      responses:
+        "200":
+          description: The runtime's agents.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Agent" }
+        "401":
+          description: Missing, malformed, expired or foreign access token, or its runtime no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
 components:
   securitySchemes:
     bearerAuth:
@@ -1404,6 +1607,12 @@ components:
             $ref: "#/components/schemas/ErrorEnvelope"
     Invalid:
       description: Malformed body or query, or invalid fields (details.fields).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    AgentNotFound:
+      description: No such agent, a malformed id, or an agent in a workspace the caller is not a member of. All get the same response.
       content:
         application/json:
           schema:
@@ -1539,6 +1748,46 @@ components:
           description: Last time the credential was exchanged for an access token; null if never.
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AgentCapabilities:
+      type: object
+      additionalProperties: false
+      properties:
+        supports_streaming: { type: boolean }
+        supports_cancel: { type: boolean }
+        supports_resume: { type: boolean }
+        session_scope: { type: string, maxLength: 64 }
+    AgentRegistration:
+      type: object
+      required: [provider, name]
+      properties:
+        runtime_id: { type: string, format: uuid, description: Required on POST /api/v1/agents; ignored on /v1/runtime/agents. }
+        provider: { type: string, pattern: "^[a-z][a-z0-9_]*$", maxLength: 64, description: "Adapter that runs the agent, as the runtime will announce it (claude_code, codex, echo)." }
+        name: { type: string, minLength: 1, maxLength: 128, description: Must match the name the runtime will announce exactly. }
+        display_name: { type: string, maxLength: 128 }
+        description: { type: string, maxLength: 1000 }
+        capabilities: { $ref: "#/components/schemas/AgentCapabilities" }
+    Agent:
+      type: object
+      required: [id, workspace_id, runtime_id, provider, name, display_name, description, version, capabilities, status, last_seen_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        runtime_id: { type: string, format: uuid }
+        provider: { type: string }
+        name: { type: string }
+        display_name: { type: [string, "null"] }
+        description: { type: [string, "null"] }
+        version: { type: [string, "null"], description: Set by the runtime's hello. }
+        capabilities: { $ref: "#/components/schemas/AgentCapabilities" }
+        status: { type: string, enum: [online, offline, busy], description: A registered agent is offline until its runtime announces it. }
+        last_seen_at: { type: string, format: date-time, description: The last hello that announced it, or when it was registered. }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    AgentEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Agent" }
     Conversation:
       type: object
       required: [id, workspace_id, project_id, title, created_by, last_seq, created_at, updated_at]
