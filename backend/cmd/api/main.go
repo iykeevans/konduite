@@ -23,6 +23,7 @@ import (
 	"github.com/iykeevans/konduite/backend/internal/authz"
 	"github.com/iykeevans/konduite/backend/internal/conversations"
 	"github.com/iykeevans/konduite/backend/internal/deadletters"
+	"github.com/iykeevans/konduite/backend/internal/gateway"
 	"github.com/iykeevans/konduite/backend/internal/members"
 	"github.com/iykeevans/konduite/backend/internal/messages"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
@@ -86,13 +87,19 @@ func run() error {
 	projectMemberHandler := projectmembers.NewHandler(projectmembers.NewService(projectmembers.NewPostgresRepository(pool), az))
 	agentHandler := agents.NewHandler(agents.NewRegistry(agents.NewPostgresRegistryRepository(pool), az),
 		runtimeVerifier(tokenKey.Public().(ed25519.PublicKey)))
+	tokenPub := tokenKey.Public().(ed25519.PublicKey)
+	runtimeGateway := gateway.New(gateway.Config{
+		Verify:     func(token string) (runtimes.Claims, error) { return runtimes.VerifyAccessToken(tokenPub, token) },
+		Agents:     agents.NewService(agents.NewPostgresRepository(pool)),
+		Subscriber: bus,
+	})
 
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
 			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, projectHandler.Routes, conversationHandler.Routes, messageHandler.Routes, memberHandler.Routes, projectMemberHandler.Routes, dlqHandler.Routes, agentHandler.Routes},
-			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes, agentHandler.RuntimeRoutes},
+			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes, agentHandler.RuntimeRoutes, runtimeGateway.Routes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -102,8 +109,14 @@ func run() error {
 		return err
 	}
 	slog.Info("api listening", "addr", ln.Addr().String(), "env", cfg.Env)
-	if err := server.Serve(ctx, srv, ln, cfg.ShutdownTimeout); err != nil {
-		return err
+	serveErr := server.Serve(ctx, srv, ln, cfg.ShutdownTimeout)
+	gwCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), cfg.ShutdownTimeout)
+	defer cancel()
+	if err := runtimeGateway.Shutdown(gwCtx); err != nil {
+		slog.Warn("runtime connections did not close in time", "error", err)
+	}
+	if serveErr != nil {
+		return serveErr
 	}
 	slog.Info("api stopped")
 	return nil
