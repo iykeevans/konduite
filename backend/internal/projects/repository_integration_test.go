@@ -105,7 +105,7 @@ func TestPostgresCreateStoresProjectMaintainerAndAuditEntry(t *testing.T) {
 		p.RepositoryURL != "git@github.com:acme/konduite.git" || p.CreatedBy != pm || p.CreatedAt.IsZero() {
 		t.Errorf("project = %+v, want Konduite in ws created by the project manager", p)
 	}
-	m, err := authz.StoreMemberships(store.New(pool)).(authz.ProjectMemberships).ProjectMembership(t.Context(), p.ID, pm)
+	m, err := authz.StoreMemberships(store.New(pool)).ProjectMembership(t.Context(), p.ID, pm)
 	if err != nil || m.ProjectRole != authz.ProjectRoleMaintainer {
 		t.Errorf("creator's project membership = %+v, %v; want maintainer", m, err)
 	}
