@@ -916,6 +916,74 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/admin/dlq:
+    get:
+      summary: List dead-lettered events, oldest first. Platform admins only.
+      description: |
+        Reads the AGENTHUB_DLQ stream. Entries describe the failure but leave
+        out the payload, which can hold any workspace's data. Only users in
+        PLATFORM_ADMIN_USER_IDS may call it; everyone else gets 404, as if
+        the route did not exist. An empty list denies everyone.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of dead letters.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeadLetter" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: The caller is not a platform admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: limit out of range or cursor malformed (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/admin/dlq/{seq}/replay:
+    post:
+      summary: Republish a dead letter to its original subject and remove it from the DLQ. Platform admins only.
+      description: |
+        Every consumer on the original subject receives the event again and
+        dedupes by event id, so consumers that already handled it skip it.
+        The replay is published with Nats-Msg-Id `replay:<seq>` and the
+        original id in the `Konduite-Event-Id` header: reusing the original
+        Nats-Msg-Id inside the 2-minute dedupe window would make JetStream
+        drop the replay silently. Replaying the same entry twice within that
+        window publishes once.
+      parameters:
+        - { name: seq, in: path, required: true, schema: { type: integer, format: int64, minimum: 1 } }
+      responses:
+        "204":
+          description: Republished and removed from the DLQ.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No dead letter with that sequence, the sequence is malformed, or the caller is not a platform admin.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: The entry has no original agenthub subject to replay to.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /v1/runtime/token:
     post:
       summary: Exchange a runtime refresh credential for a 15-minute access token.
@@ -1241,6 +1309,19 @@ components:
         invited_by: { type: string, format: uuid }
         expires_at: { type: string, format: date-time }
         created_at: { type: string, format: date-time }
+    DeadLetter:
+      type: object
+      required: [seq, subject, event_id, consumer, attempts, error, failed_at, stored_at, size_bytes]
+      properties:
+        seq: { type: integer, format: int64, description: Sequence in AGENTHUB_DLQ; the replay path takes it. }
+        subject: { type: string, description: The subject the event was published on, e.g. agenthub.message.created. }
+        event_id: { type: string }
+        consumer: { type: string, description: Durable name of the consumer that gave up. }
+        attempts: { type: integer, description: Deliveries to the handler before it was dead-lettered. }
+        error: { type: string, description: The last handler error, credential-looking values masked, at most 512 bytes. }
+        failed_at: { type: string, format: date-time }
+        stored_at: { type: string, format: date-time }
+        size_bytes: { type: integer, description: Payload size. The payload itself is not returned. }
     ErrorEnvelope:
       type: object
       required: [error]

@@ -1,6 +1,7 @@
 package log_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
@@ -37,5 +38,12 @@ func TestSecretValue(t *testing.T) {
 		if got := log.SecretValue(value); got != want {
 			t.Errorf("SecretValue(%q) = %v, want %v", value, got, want)
 		}
+	}
+}
+
+func TestScrubMasksCredentialValues(t *testing.T) {
+	got := log.Scrub("dial nats://u:hunter2@host failed, sent Bearer abc.def")
+	if strings.Contains(got, "hunter2") || strings.Contains(got, "abc.def") {
+		t.Errorf("Scrub left a credential: %q", got)
 	}
 }

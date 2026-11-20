@@ -12,3 +12,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [Message ordering and idempotency](message-ordering-and-idempotency.md) — seq from conversations.last_seq in the write tx; AppendTx returns the original on retry without using a number; message.created has ids, not content.
 - [Parallel agent worktrees](parallel-agent-worktrees.md) — fresh worktree needs `next typegen` before the web type-check (LayoutProps); rerun an integration package alone when testcontainers miss their deadline.
 - [Workspace membership](workspace-membership.md) — invitation tokens hashed and shown once, accept link in a URL fragment POSTed in a body, email-bound accept, last-owner guard under row locks.
+- [Consumer retry and dead-letter](consumer-retry-and-dlq.md) — every consumer uses nats.Client.Consume; publish DLQ then Term; replay gets a new msg id; admin allow-list gate.
