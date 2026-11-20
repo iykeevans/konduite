@@ -124,27 +124,38 @@ func (q *Queries) ListConversationParticipants(ctx context.Context, conversation
 }
 
 const listConversations = `-- name: ListConversations :many
-SELECT id, workspace_id, project_id, title, created_by, last_seq, created_at, updated_at FROM conversations
-WHERE workspace_id = $1
-  AND ($2::uuid IS NULL OR project_id = $2::uuid)
-  AND ($3::timestamptz IS NULL
-       OR (created_at, id) < ($3::timestamptz, $4::uuid))
-ORDER BY created_at DESC, id DESC
-LIMIT $5
+SELECT c.id, c.workspace_id, c.project_id, c.title, c.created_by, c.last_seq, c.created_at, c.updated_at FROM conversations c
+WHERE c.workspace_id = $1
+  AND ($2::uuid IS NULL OR c.project_id = $2::uuid)
+  AND (c.project_id IS NULL
+       OR EXISTS (SELECT 1 FROM workspace_members wm
+                  WHERE wm.workspace_id = c.workspace_id AND wm.user_id = $3
+                    AND wm.role IN ('owner', 'admin'))
+       OR EXISTS (SELECT 1 FROM project_members pm
+                  WHERE pm.project_id = c.project_id AND pm.user_id = $3))
+  AND ($4::timestamptz IS NULL
+       OR (c.created_at, c.id) < ($4::timestamptz, $5::uuid))
+ORDER BY c.created_at DESC, c.id DESC
+LIMIT $6
 `
 
 type ListConversationsParams struct {
 	WorkspaceID    uuid.UUID
 	ProjectID      *uuid.UUID
+	ViewerID       uuid.UUID
 	AfterCreatedAt *time.Time
 	AfterID        *uuid.UUID
 	RowLimit       int32
 }
 
+// Project conversations are visible to the viewer only where authz allows
+// project.view: workspace owner/admin, or any project_members row. Keep this in
+// step with authz.projectAllowed and implicitMaintainers.
 func (q *Queries) ListConversations(ctx context.Context, arg ListConversationsParams) ([]Conversation, error) {
 	rows, err := q.db.Query(ctx, listConversations,
 		arg.WorkspaceID,
 		arg.ProjectID,
+		arg.ViewerID,
 		arg.AfterCreatedAt,
 		arg.AfterID,
 		arg.RowLimit,

@@ -32,4 +32,10 @@ Decided in SEC-001 (#24) and SEC-002 (#25), 2026-11-19. Code: `backend/internal/
 - **Wiring (explicit since 2026-11-20):** production builds the authorizer with `authz.NewWithProjects(authz.StoreMemberships(q))` (`newAuthorizer` in `cmd/api/main.go`); `NewWithProjects` takes a `Directory` (Memberships + ProjectMemberships), so dropping the project lookup is a compile error, and `cmd/api/main_test.go` checks the wiring. `authz.New(m)` still works for workspace-only test fakes and type-asserts `m` for project lookups; without one, project checks return `authz.ErrNoProjectLookup` (a 500).
 - **Agent hook (for SEC-003):** `authz.New(m, authz.WithGrants(kind, g))` routes principals of `kind` on `Project` resources to `g.ProjectActions(ctx, principalID, projectID)`; return `authz.ErrNoGrant` for no grant (404). The principal may do exactly the returned actions (else 403) and still can't see `Workspace` resources. Kinds without a registered `Grants` stay 404. SEC-003 registers the agent kind backed by `agent_project_access`.
 
+## Conversations in a project (2026-11-20)
+
+- A conversation with a `project_id` follows the project, not the workspace: reading needs `project.view`, creating needs `project.contribute` (viewers are read-only, as for messages). Workspace-wide conversations stay open to every member.
+- Get of a hidden one returns the same `conversation not found` 404 as a missing one, including when authz said 403.
+- The list filters in SQL (`ListConversations`: owner/admin or any `project_members` row), not by calling `Can` per row. That duplicates the `project.view` rule, so `TestPostgresRepositoryListsProjectConversationsOnlyToWhoeverAuthzLetsViewTheProject` cross-checks the SQL against `authz.Can` for every role combination; update both together.
+
 Related: [[api-envelope-and-error-mapping]], [[user-ids-have-no-auth-fk]]

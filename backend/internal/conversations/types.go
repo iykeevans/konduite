@@ -83,10 +83,13 @@ type NewConversation struct {
 }
 
 // ListFilter selects at most Limit conversations of a workspace, newest
-// first, strictly after After.
+// first, strictly after After. Conversations in a project are included only
+// if ViewerID can view that project: a workspace owner or admin, or a user
+// with any project_members row (the authz.ActionViewProject rule).
 type ListFilter struct {
 	WorkspaceID uuid.UUID
 	ProjectID   *uuid.UUID
+	ViewerID    uuid.UUID
 	After       *Position
 	Limit       int
 }

@@ -79,7 +79,7 @@ func (r postgresRepository) Get(ctx context.Context, id uuid.UUID) (Conversation
 }
 
 func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Conversation, error) {
-	params := store.ListConversationsParams{WorkspaceID: f.WorkspaceID, ProjectID: f.ProjectID, RowLimit: int32(f.Limit)} //nolint:gosec // Limit is at most 101, set by the service.
+	params := store.ListConversationsParams{WorkspaceID: f.WorkspaceID, ProjectID: f.ProjectID, ViewerID: f.ViewerID, RowLimit: int32(f.Limit)} //nolint:gosec // Limit is at most 101, set by the service.
 	if f.After != nil {
 		params.AfterCreatedAt = &f.After.CreatedAt
 		params.AfterID = &f.After.ID

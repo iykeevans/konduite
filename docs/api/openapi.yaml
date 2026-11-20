@@ -242,9 +242,11 @@ paths:
     post:
       summary: Start a conversation in a workspace.
       description: |
-        Every workspace member may create one. The caller becomes `created_by`
-        and the first participant (type `user`). Non-members get 404 as if
-        the workspace did not exist.
+        Every workspace member may create a workspace-wide one. One with a
+        `project_id` also needs `project.contribute` on that project (workspace
+        owner/admin, or project maintainer/contributor). The caller becomes
+        `created_by` and the first participant (type `user`). Non-members get
+        404 as if the workspace did not exist.
       requestBody:
         required: true
         content:
@@ -268,6 +270,12 @@ paths:
                   data: { $ref: "#/components/schemas/Conversation" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller may see the project but not contribute to it (a project viewer, or a member without a project role).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
           description: The workspace does not exist or the caller is not a member.
           content:
@@ -282,7 +290,10 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
     get:
       summary: List a workspace's conversations, newest first.
-      description: Every workspace member sees every conversation in it. Items omit `participants`.
+      description: |
+        Every workspace member sees the workspace-wide conversations. Ones in a
+        project are listed only to callers who can view that project (workspace
+        owner/admin, or any project role). Items omit `participants`.
       parameters:
         - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: project_id, in: query, description: Only conversations in this project., schema: { type: string, format: uuid } }
@@ -303,8 +314,14 @@ paths:
                   meta: { $ref: "#/components/schemas/PageMeta" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: project_id names a project the caller cannot view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
-          description: The workspace does not exist or the caller is not a member.
+          description: The workspace does not exist, the caller is not a member, or project_id is not a project in it.
           content:
             application/json:
               schema:
@@ -333,7 +350,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "404":
-          description: No such conversation, or it is in a workspace the caller is not a member of. Both get the same response.
+          description: No such conversation, it is in a workspace the caller is not a member of, or it is in a project the caller cannot view. All get the same response.
           content:
             application/json:
               schema:

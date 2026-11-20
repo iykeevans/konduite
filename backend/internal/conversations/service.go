@@ -44,12 +44,21 @@ func (s *Service) Create(ctx context.Context, p auth.Principal, in CreateInput) 
 	if err := s.az.Can(ctx, p, authz.ActionCreateConversation, authz.Workspace(in.WorkspaceID)); err != nil {
 		return Conversation{}, err
 	}
+	projectNotFound := errs.Invalid("invalid conversation", map[string]string{"project_id": "not found in this workspace"})
+	if in.ProjectID != nil {
+		err := s.az.Can(ctx, p, authz.ActionContribute, authz.Resource{WorkspaceID: in.WorkspaceID, ProjectID: *in.ProjectID})
+		if isNotFound(err) {
+			return Conversation{}, projectNotFound
+		}
+		if err != nil {
+			return Conversation{}, err
+		}
+	}
 	c, err := s.repo.Create(ctx, NewConversation{
 		WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, Title: title, CreatedBy: p.ID,
 	})
 	if errors.Is(err, ErrProjectNotFound) {
-		return Conversation{}, errs.Invalid("invalid conversation",
-			map[string]string{"project_id": "not found in this workspace"})
+		return Conversation{}, projectNotFound
 	}
 	return c, err
 }
@@ -65,13 +74,27 @@ func (s *Service) Get(ctx context.Context, p auth.Principal, id uuid.UUID) (Conv
 	if err != nil {
 		return Conversation{}, err
 	}
-	if err := s.az.Can(ctx, p, authz.ActionViewConversations, authz.Workspace(c.WorkspaceID)); err != nil {
-		if e, ok := errs.As(err); ok && e.Kind == errs.KindNotFound {
+	if err := s.canView(ctx, p, c); err != nil {
+		if e, ok := errs.As(err); ok && (e.Kind == errs.KindNotFound || e.Kind == errs.KindForbidden) {
 			return Conversation{}, notFound
 		}
 		return Conversation{}, err
 	}
 	return c, nil
+}
+
+// canView checks that p may read c: any workspace member for a
+// workspace-wide conversation, ActionViewProject for one in a project.
+func (s *Service) canView(ctx context.Context, p auth.Principal, c Conversation) error {
+	if c.ProjectID != nil {
+		return s.az.Can(ctx, p, authz.ActionViewProject, authz.Resource{WorkspaceID: c.WorkspaceID, ProjectID: *c.ProjectID})
+	}
+	return s.az.Can(ctx, p, authz.ActionViewConversations, authz.Workspace(c.WorkspaceID))
+}
+
+func isNotFound(err error) bool {
+	e, ok := errs.As(err)
+	return ok && e.Kind == errs.KindNotFound
 }
 
 // List returns a page of in.WorkspaceID's conversations, newest first.
@@ -82,8 +105,13 @@ func (s *Service) List(ctx context.Context, p auth.Principal, in ListInput) (Pag
 	if err := s.az.Can(ctx, p, authz.ActionViewConversations, authz.Workspace(in.WorkspaceID)); err != nil {
 		return Page{}, err
 	}
+	if in.ProjectID != nil {
+		if err := s.az.Can(ctx, p, authz.ActionViewProject, authz.Resource{WorkspaceID: in.WorkspaceID, ProjectID: *in.ProjectID}); err != nil {
+			return Page{}, err
+		}
+	}
 	items, err := s.repo.List(ctx, ListFilter{
-		WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, After: in.After, Limit: in.Limit + 1,
+		WorkspaceID: in.WorkspaceID, ProjectID: in.ProjectID, ViewerID: p.ID, After: in.After, Limit: in.Limit + 1,
 	})
 	if err != nil {
 		return Page{}, err
