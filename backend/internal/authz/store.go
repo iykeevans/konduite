@@ -10,19 +10,19 @@ import (
 	"github.com/iykeevans/konduite/backend/internal/store"
 )
 
-// StoreMemberships returns Memberships backed by the workspace_members table.
-// It also implements ProjectMemberships from projects and project_members.
-func StoreMemberships(q *store.Queries) Memberships {
-	return storeMemberships{q: q}
+// StoreMemberships returns the Directory backed by workspace_members,
+// projects and project_members. Pass it to NewWithProjects.
+func StoreMemberships(q *store.Queries) StoreDirectory {
+	return StoreDirectory{q: q}
 }
 
-var _ ProjectMemberships = storeMemberships{}
-
-type storeMemberships struct {
+// StoreDirectory is the Postgres-backed Directory.
+type StoreDirectory struct {
 	q *store.Queries
 }
 
-func (s storeMemberships) Role(ctx context.Context, workspaceID, userID uuid.UUID) (Role, error) {
+// Role implements Memberships.
+func (s StoreDirectory) Role(ctx context.Context, workspaceID, userID uuid.UUID) (Role, error) {
 	role, err := s.q.GetWorkspaceMemberRole(ctx, store.GetWorkspaceMemberRoleParams{
 		WorkspaceID: workspaceID,
 		UserID:      userID,
@@ -36,7 +36,8 @@ func (s storeMemberships) Role(ctx context.Context, workspaceID, userID uuid.UUI
 	return Role(role), nil
 }
 
-func (s storeMemberships) ProjectMembership(ctx context.Context, projectID, userID uuid.UUID) (ProjectMembership, error) {
+// ProjectMembership implements ProjectMemberships.
+func (s StoreDirectory) ProjectMembership(ctx context.Context, projectID, userID uuid.UUID) (ProjectMembership, error) {
 	row, err := s.q.GetProjectMembership(ctx, store.GetProjectMembershipParams{
 		ProjectID: projectID,
 		UserID:    userID,

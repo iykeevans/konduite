@@ -106,6 +106,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/runtimes:
+    get:
+      summary: List a workspace's runtimes, newest first.
+      description: |
+        Every workspace member sees every runtime in it. No credential
+        material is ever returned. Connection state arrives with RT-004; until
+        then `credential_last_used_at` (the last token exchange) is the best
+        sign of life.
+      parameters:
+        - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of runtimes.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Runtime" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: The workspace does not exist or the caller is not a member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: workspace_id missing or not a UUID, or a bad limit or cursor (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/runtimes/{runtimeID}:
+    get:
+      summary: Get a runtime.
+      parameters:
+        - { name: runtimeID, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: The runtime.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Runtime" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such runtime, a malformed id, or a runtime in a workspace the caller is not a member of. All get the same response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/workspaces:
     post:
       summary: Create a workspace. The caller becomes its owner.
@@ -238,13 +300,423 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/workspaces/{workspaceId}/members:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      summary: List a workspace's members, ordered by join time.
+      description: Every member may list members.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          $ref: "#/components/responses/Invalid"
+  /api/v1/workspaces/{workspaceId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Change a member's role.
+      description: |
+        Owners and admins may change roles. Only owners may make someone an
+        owner or change an owner's role, and the last owner cannot be
+        demoted. A real change writes a `member.role_changed` audit log entry
+        in the same transaction; setting the current role is a no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "200":
+          description: The member with their new role.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Member" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The workspace is not visible to the caller, or the user is not a member of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The change would leave the workspace without an owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
+    delete:
+      summary: Remove a member, or leave the workspace.
+      description: |
+        Owners and admins may remove other members; only owners may remove an
+        owner. Any member may remove themselves. The last owner can neither
+        be removed nor leave. Writes a `member.removed` audit log entry in the
+        same transaction.
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The workspace is not visible to the caller, or the user is not a member of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The caller is the last owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /api/v1/workspaces/{workspaceId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    post:
+      summary: Invite someone by email.
+      description: |
+        Owners and admins may invite. The response carries the invitation
+        `token` once; only its SHA-256 hash is stored, so it cannot be shown
+        again. No email is sent: the inviter shares the accept link
+        themselves. Invitations expire after 7 days, can be used once, and
+        only by a signed-in user whose token email matches. An expired open
+        invitation for the same email is replaced. Writes an
+        `invitation.created` audit log entry in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email, maxLength: 254, description: Trimmed and lowercased. }
+                role: { type: string, enum: [admin, developer, project_manager] }
+      responses:
+        "201":
+          description: "Created. Sent with `Cache-Control: no-store`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/Invitation"
+                      - type: object
+                        required: [token]
+                        properties:
+                          token: { type: string, description: Secret. Shown only in this response. }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "409":
+          description: The email belongs to a member, or an unexpired invitation for it is open.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
+    get:
+      summary: List open invitations, expired ones included, ordered by creation time.
+      description: Owners and admins only. Tokens are never listed.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of open invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Invitation" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          $ref: "#/components/responses/Invalid"
+  /api/v1/workspaces/{workspaceId}/invitations/{invitationId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: invitationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      summary: Revoke an open invitation so its token stops working.
+      description: Owners and admins only. Writes an `invitation.revoked` audit log entry.
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The workspace is not visible, or no open invitation has that id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /api/v1/invitations/accept:
+    post:
+      summary: Accept an invitation and join its workspace.
+      description: |
+        The token goes in the body, never the URL. The caller's token email
+        must match the invitation's. The membership, the invitation's
+        accepted mark and a `member.joined` audit log entry are written in
+        one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "200":
+          description: Joined.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [workspace_id, role]
+                    properties:
+                      workspace_id: { type: string, format: uuid }
+                      role: { $ref: "#/components/schemas/Role" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller's email differs from the invitation's, or their account has no email.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: Unknown, revoked, used or expired token. All look the same.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The caller is already a member of the workspace.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
+  /api/v1/workspaces/{workspaceId}/projects:
+    parameters:
+      - name: workspaceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Create a project in a workspace. The caller becomes its maintainer.
+      description: |
+        Workspace owners, admins and project managers may create projects;
+        developers get 403. The project, the caller's `maintainer`
+        project membership and a `project.created` audit log entry are
+        written in one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { $ref: "#/components/schemas/ProjectName" }
+                description: { $ref: "#/components/schemas/ProjectDescription" }
+                repository_url: { $ref: "#/components/schemas/RepositoryURL" }
+      responses:
+        "201":
+          description: Created. `Location` is the new project's URL.
+          headers:
+            Location:
+              schema: { type: string, example: /api/v1/projects/0b6f3c2a-1d4e-4f6b-8a9c-3e2d1f0a9b8c }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller's workspace role cannot create projects.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "409":
+          description: The workspace already has a project with that name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, or name/description/repository_url invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: List the projects in a workspace the caller can view, ordered by name.
+      description: |
+        Workspace owners and admins see every project. Other members see only
+        the projects they have a project role in.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of projects.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          description: limit out of range or cursor malformed (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Get a project the caller can view.
+      responses:
+        "200":
+          description: The project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+    patch:
+      summary: Change a project's name, description or repository URL.
+      description: |
+        Project maintainers and workspace owners/admins may update. Callers
+        who can view the project but not maintain it get 403. Send at least
+        one field; omitted fields are left unchanged and an empty
+        `repository_url` clears it. When something actually changes, a
+        `project.updated` audit log entry recording the old and new values is
+        written in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name: { $ref: "#/components/schemas/ProjectName" }
+                description: { $ref: "#/components/schemas/ProjectDescription" }
+                repository_url: { $ref: "#/components/schemas/RepositoryURL" }
+      responses:
+        "200":
+          description: The updated project.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvelope"
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can view the project but cannot update it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+        "409":
+          description: The workspace already has a project with that name.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed or empty body, or name/description/repository_url invalid (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/conversations:
     post:
       summary: Start a conversation in a workspace.
       description: |
-        Every workspace member may create one. The caller becomes `created_by`
-        and the first participant (type `user`). Non-members get 404 as if
-        the workspace did not exist.
+        Every workspace member may create a workspace-wide one. One with a
+        `project_id` also needs `project.contribute` on that project (workspace
+        owner/admin, or project maintainer/contributor). The caller becomes
+        `created_by` and the first participant (type `user`). Non-members get
+        404 as if the workspace did not exist.
       requestBody:
         required: true
         content:
@@ -268,6 +740,12 @@ paths:
                   data: { $ref: "#/components/schemas/Conversation" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller may see the project but not contribute to it (a project viewer, or a member without a project role).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
           description: The workspace does not exist or the caller is not a member.
           content:
@@ -282,7 +760,10 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
     get:
       summary: List a workspace's conversations, newest first.
-      description: Every workspace member sees every conversation in it. Items omit `participants`.
+      description: |
+        Every workspace member sees the workspace-wide conversations. Ones in a
+        project are listed only to callers who can view that project (workspace
+        owner/admin, or any project role). Items omit `participants`.
       parameters:
         - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: project_id, in: query, description: Only conversations in this project., schema: { type: string, format: uuid } }
@@ -303,8 +784,14 @@ paths:
                   meta: { $ref: "#/components/schemas/PageMeta" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: project_id names a project the caller cannot view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
-          description: The workspace does not exist or the caller is not a member.
+          description: The workspace does not exist, the caller is not a member, or project_id is not a project in it.
           content:
             application/json:
               schema:
@@ -333,7 +820,98 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "404":
-          description: No such conversation, or it is in a workspace the caller is not a member of. Both get the same response.
+          description: No such conversation, it is in a workspace the caller is not a member of, or it is in a project the caller cannot view. All get the same response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations/{id}/participants:
+    post:
+      summary: Add a user, agent or runtime to a conversation.
+      description: |
+        Needs the same right as contributing to the conversation: any workspace
+        member for a workspace-wide one, `project.contribute` for one in a
+        project. A user participant must be able to read the conversation; an
+        agent or runtime must belong to its workspace. Idempotent: adding an
+        existing participant returns 200 with the stored one.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, id]
+              properties:
+                type: { type: string, enum: [user, agent, runtime] }
+                id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Participant" }
+        "200":
+          description: Already a participant; the stored participant, unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Participant" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can read the conversation but not contribute to it (a project viewer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No such conversation, or the caller cannot read it. Same response as GET.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, an unknown type, a bad id, a user who cannot read the conversation, or an agent/runtime outside its workspace (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations/{id}/participants/{type}/{participant_id}:
+    delete:
+      summary: Remove a participant from a conversation.
+      description: Same permission as adding. Idempotent; removing someone who is not a participant also returns 204.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [user, agent, runtime] } }
+        - { name: participant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: Removed, or was not a participant.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can read the conversation but not contribute to it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No such conversation, the caller cannot read it, or an id in the path is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: An unknown participant type (details.fields).
           content:
             application/json:
               schema:
@@ -455,6 +1033,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /v1/runtime/self:
+    get:
+      summary: Get the runtime a runtime access token was issued to.
+      description: |
+        Used by `agenthub status`. Authenticated with a runtime access token
+        from /v1/runtime/token (not a Supabase token), so it sits outside
+        /api/v1. The token can only name its own runtime, so no workspace
+        role is checked.
+      security:
+        - runtimeAuth: []
+      responses:
+        "200":
+          description: "The runtime. Sent with `Cache-Control: no-store`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Runtime" }
+        "401":
+          description: Missing, malformed, expired or foreign access token, or its runtime no longer exists.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /v1/runtime/revoke:
     post:
       summary: Revoke a runtime refresh credential.
@@ -496,12 +1100,29 @@ components:
       scheme: bearer
       bearerFormat: JWT
       description: Supabase access token, verified against the project's JWKS (ES256 or RS256).
+    runtimeAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Runtime access token from POST /v1/runtime/token (EdDSA, aud `konduite-runtime`).
   responses:
     Unauthenticated:
       description: Missing, malformed, expired or invalid access token.
       headers:
         WWW-Authenticate:
           schema: { type: string, example: Bearer }
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: The caller is a member but their role does not allow this.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Invalid:
+      description: Malformed body or query, or invalid fields (details.fields).
       content:
         application/json:
           schema:
@@ -514,7 +1135,21 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    ProjectNotFound:
+      description: |
+        The project does not exist, the caller cannot view it (not a member
+        of its workspace, or a member with no role in it who is not an owner
+        or admin), or the id is not a UUID. All look the same.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
   parameters:
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     Limit:
       name: limit
       in: query
@@ -564,12 +1199,65 @@ components:
       required: [data]
       properties:
         data: { $ref: "#/components/schemas/Workspace" }
+    ProjectName:
+      type: string
+      minLength: 1
+      maxLength: 100
+      description: Unique within the workspace. Trimmed.
+    ProjectDescription:
+      type: string
+      maxLength: 2000
+      default: ""
+      description: Trimmed.
+    RepositoryURL:
+      type: string
+      maxLength: 500
+      description: |
+        An `https://`, `ssh://` or scp-like (`git@host:org/repo.git`) git URL
+        with a host and path. Credentials are rejected: no user info in
+        https URLs, no password in ssh URLs. No query or fragment. Empty means
+        none.
+      example: git@github.com:acme/konduite.git
+    Project:
+      type: object
+      required: [id, workspace_id, name, description, repository_url, created_by, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        repository_url: { type: [string, "null"] }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProjectEnvelope:
+      type: object
+      required: [data]
+      properties:
+        data: { $ref: "#/components/schemas/Project" }
     PageMeta:
       type: object
       required: [has_more]
       properties:
         next_cursor: { type: string, description: Absent on the last page. }
         has_more: { type: boolean }
+    Runtime:
+      type: object
+      required: [id, workspace_id, owner_id, name, revoked, credential_last_used_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        owner_id: { type: string, format: uuid, description: The user who registered it. }
+        name: { type: string }
+        revoked:
+          type: boolean
+          description: The runtime has no refresh credential left (logged out or revoked), so it cannot get new access tokens.
+        credential_last_used_at:
+          type: [string, "null"]
+          format: date-time
+          description: Last time the credential was exchanged for an access token; null if never.
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
     Conversation:
       type: object
       required: [id, workspace_id, project_id, title, created_by, last_seq, created_at, updated_at]
@@ -589,13 +1277,38 @@ components:
         participants:
           type: array
           description: Present on create and get, omitted in lists.
-          items:
-            type: object
-            required: [type, id, joined_at]
-            properties:
-              type: { type: string, enum: [user, agent, runtime] }
-              id: { type: string, format: uuid, description: A user, agent or runtime id depending on type. }
-              joined_at: { type: string, format: date-time }
+          items: { $ref: "#/components/schemas/Participant" }
+    Participant:
+      type: object
+      required: [type, id, joined_at]
+      properties:
+        type: { type: string, enum: [user, agent, runtime] }
+        id: { type: string, format: uuid, description: A user, agent or runtime id depending on type. }
+        joined_at: { type: string, format: date-time }
+    Role:
+      type: string
+      enum: [owner, admin, developer, project_manager]
+    Member:
+      type: object
+      required: [user_id, role, email, joined_at]
+      properties:
+        user_id: { type: string, format: uuid }
+        role: { $ref: "#/components/schemas/Role" }
+        email:
+          type: [string, "null"]
+          description: The email the member joined with; null for memberships created before it was recorded.
+        joined_at: { type: string, format: date-time }
+    Invitation:
+      type: object
+      required: [id, workspace_id, email, role, invited_by, expires_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        email: { type: string }
+        role: { type: string, enum: [admin, developer, project_manager] }
+        invited_by: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
     DeadLetter:
       type: object
       required: [seq, subject, event_id, consumer, attempts, error, failed_at, stored_at, size_bytes]

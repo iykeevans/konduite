@@ -4,8 +4,8 @@ VALUES ($1, $2, $3)
 RETURNING *;
 
 -- name: InsertWorkspaceMember :exec
-INSERT INTO workspace_members (workspace_id, user_id, role)
-VALUES ($1, $2, $3);
+INSERT INTO workspace_members (workspace_id, user_id, role, email)
+VALUES (@workspace_id, @user_id, @role, sqlc.narg('email'));
 
 -- name: GetWorkspaceForMember :one
 SELECT w.id, w.name, w.slug, w.created_by, w.created_at, w.updated_at, m.role

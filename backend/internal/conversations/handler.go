@@ -31,6 +31,13 @@ func (h *Handler) Routes(r chi.Router) {
 	r.Post("/conversations", h.create)
 	r.Get("/conversations", h.list)
 	r.Get("/conversations/{id}", h.get)
+	r.Post("/conversations/{id}/participants", h.addParticipant)
+	r.Delete("/conversations/{id}/participants/{kind}/{participantID}", h.removeParticipant)
+}
+
+type participantRequest struct {
+	Type ParticipantKind `json:"type"`
+	ID   string          `json:"id"`
 }
 
 type createRequest struct {
@@ -160,6 +167,62 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		next = httpx.EncodeCursor(res.Next)
 	}
 	httpx.JSONPage(w, items, next)
+}
+
+func (h *Handler) addParticipant(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, r, errs.NotFound("conversation not found"))
+		return
+	}
+	var req participantRequest
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBodyBytes)).Decode(&req); err != nil {
+		httpx.Error(w, r, errs.Invalid("request body must be a JSON object", nil))
+		return
+	}
+	fields := map[string]string{}
+	participantID := parseUUID(req.ID, "id", fields)
+	if len(fields) > 0 {
+		httpx.Error(w, r, errs.Invalid("invalid participant", fields))
+		return
+	}
+	added, created, err := h.svc.AddParticipant(r.Context(), p, id, ParticipantInput{Kind: req.Type, ID: participantID})
+	if err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if created {
+		status = http.StatusCreated
+	}
+	httpx.JSON(w, status, participantResponse{Type: added.Kind, ID: added.ID, JoinedAt: added.JoinedAt})
+}
+
+func (h *Handler) removeParticipant(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpx.Error(w, r, errs.NotFound("conversation not found"))
+		return
+	}
+	participantID, err := uuid.Parse(chi.URLParam(r, "participantID"))
+	if err != nil {
+		httpx.Error(w, r, errs.NotFound("participant not found"))
+		return
+	}
+	kind := ParticipantKind(chi.URLParam(r, "kind"))
+	if err := h.svc.RemoveParticipant(r.Context(), p, id, kind, participantID); err != nil {
+		httpx.Error(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func principal(w http.ResponseWriter, r *http.Request) (auth.Principal, bool) {

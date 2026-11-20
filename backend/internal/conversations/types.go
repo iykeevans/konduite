@@ -83,10 +83,13 @@ type NewConversation struct {
 }
 
 // ListFilter selects at most Limit conversations of a workspace, newest
-// first, strictly after After.
+// first, strictly after After. Conversations in a project are included only
+// if ViewerID can view that project: a workspace owner or admin, or a user
+// with any project_members row (the authz.ActionViewProject rule).
 type ListFilter struct {
 	WorkspaceID uuid.UUID
 	ProjectID   *uuid.UUID
+	ViewerID    uuid.UUID
 	After       *Position
 	Limit       int
 }
@@ -97,7 +100,17 @@ var (
 	// ErrProjectNotFound is returned by Repository.Create when the project
 	// does not exist in the conversation's workspace.
 	ErrProjectNotFound = errors.New("conversations: project not found in workspace")
+	// ErrParticipantNotInWorkspace is returned by Repository.AddParticipant
+	// when the agent or runtime does not exist in the conversation's
+	// workspace.
+	ErrParticipantNotInWorkspace = errors.New("conversations: participant not found in workspace")
 )
+
+// ParticipantInput names a user, agent or runtime to add to a conversation.
+type ParticipantInput struct {
+	Kind ParticipantKind
+	ID   uuid.UUID
+}
 
 // Repository stores conversations and their participants.
 type Repository interface {
@@ -107,6 +120,12 @@ type Repository interface {
 	// Get returns the conversation with its participants.
 	Get(ctx context.Context, id uuid.UUID) (Conversation, error)
 	List(ctx context.Context, f ListFilter) ([]Conversation, error)
+	// AddParticipant adds the participant unless it is already there, in
+	// which case it returns the stored one with created false. Agents and
+	// runtimes must belong to workspaceID; users are not checked here.
+	AddParticipant(ctx context.Context, conversationID, workspaceID uuid.UUID, kind ParticipantKind, id uuid.UUID) (p Participant, created bool, err error)
+	// RemoveParticipant removes the participant if present.
+	RemoveParticipant(ctx context.Context, conversationID uuid.UUID, kind ParticipantKind, id uuid.UUID) error
 }
 
 // Authorizer is the authz.Authorizer method the service needs.

@@ -4,7 +4,7 @@
 // Writers insert the event row in the same transaction as the change it
 // announces (db.WithTx). The relay claims unpublished rows with
 // FOR UPDATE SKIP LOCKED, publishes each payload unchanged to
-// Subject(event_type) with the row id as Nats-Msg-Id, and sets published_at
+// events.Subject(event_type) with the row id as Nats-Msg-Id, and sets published_at
 // in that same transaction. Several relays can run at once: a row is
 // claimed by one of them at a time.
 //
@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/iykeevans/konduite/backend/internal/events"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/store"
 )
@@ -38,11 +39,6 @@ const Channel = "outbox_events"
 // Publisher sends one event to the bus. *nats.Client satisfies it.
 type Publisher interface {
 	Publish(ctx context.Context, subject, msgID string, data []byte) error
-}
-
-// Subject is the NATS subject for an event type (ADR-005).
-func Subject(eventType string) string {
-	return "agenthub." + eventType
 }
 
 // Config tunes a Relay. Zero fields take the defaults noted on each.
@@ -209,7 +205,7 @@ func (r *Relay) publishBatch(ctx context.Context) (published, claimed int, err e
 func (r *Relay) publish(ctx context.Context, row store.ClaimOutboxBatchRow) error {
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.PublishTimeout)
 	defer cancel()
-	if err := r.pub.Publish(ctx, Subject(row.EventType), row.ID.String(), row.Payload); err != nil {
+	if err := r.pub.Publish(ctx, events.Subject(row.EventType), row.ID.String(), row.Payload); err != nil {
 		return fmt.Errorf("publish outbox event %s: %w", row.ID, err)
 	}
 	return nil

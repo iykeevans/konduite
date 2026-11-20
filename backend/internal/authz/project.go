@@ -51,6 +51,11 @@ var projectAllowed = map[Action][]ProjectRole{
 // without a project_members row.
 var implicitMaintainers = []Role{RoleOwner, RoleAdmin}
 
+// ImplicitMaintainers returns the workspace roles that maintain, and so can
+// view, every project in the workspace. Queries that list visible projects
+// filter with it rather than calling Can per row.
+func ImplicitMaintainers() []Role { return slices.Clone(implicitMaintainers) }
+
 // Project returns the resource for project id. Can resolves the project's
 // workspace itself, so callers never pair a project with a workspace.
 func Project(id uuid.UUID) Resource { return Resource{ProjectID: id} }
@@ -66,11 +71,22 @@ type ProjectMembership struct {
 
 // ProjectMemberships looks up a user's standing in a project. It returns
 // ErrNotMember when the project does not exist or the user is not a member
-// of the project's workspace. A Memberships passed to New that also
-// implements ProjectMemberships enables Project resources.
+// of the project's workspace.
 type ProjectMemberships interface {
 	ProjectMembership(ctx context.Context, projectID, userID uuid.UUID) (ProjectMembership, error)
 }
+
+// Directory looks up both workspace and project standing. NewWithProjects
+// takes one.
+type Directory interface {
+	Memberships
+	ProjectMemberships
+}
+
+// ErrNoProjectLookup is returned by Can for a Project resource when the
+// Authorizer was built by New from a Memberships that cannot look up
+// projects. It is a wiring bug, so it is a 500.
+var ErrNoProjectLookup = errors.New("authz: memberships cannot look up projects")
 
 // ErrNoGrant is returned by a Grants lookup when the principal has no grant
 // in the project, including when the project does not exist.
@@ -97,11 +113,10 @@ func (a *Authorizer) canProject(ctx context.Context, p auth.Principal, action Ac
 		return a.canProjectByGrant(ctx, p, action, r)
 	}
 
-	projects, ok := a.members.(ProjectMemberships)
-	if !ok {
-		return errors.New("authz: memberships cannot look up projects")
+	if a.projects == nil {
+		return ErrNoProjectLookup
 	}
-	m, err := projects.ProjectMembership(ctx, r.ProjectID, p.ID)
+	m, err := a.projects.ProjectMembership(ctx, r.ProjectID, p.ID)
 	if errors.Is(err, ErrNotMember) {
 		return projectNotFound()
 	}

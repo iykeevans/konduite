@@ -92,6 +92,21 @@ type Invitation struct {
 	ExpiresAt   time.Time
 	AcceptedAt  *time.Time
 	CreatedAt   time.Time
+	AcceptedBy  *uuid.UUID
+}
+
+type Message struct {
+	ID             uuid.UUID
+	ConversationID uuid.UUID
+	SequenceNumber int64
+	SenderType     string
+	SenderID       uuid.UUID
+	IdempotencyKey string
+	ParentID       *uuid.UUID
+	MessageType    string
+	Content        string
+	Metadata       json.RawMessage
+	CreatedAt      time.Time
 }
 
 type OutboxEvent struct {
@@ -146,4 +161,5 @@ type WorkspaceMember struct {
 	UserID      uuid.UUID
 	Role        string
 	JoinedAt    time.Time
+	Email       *string
 }
