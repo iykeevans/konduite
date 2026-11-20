@@ -138,3 +138,26 @@ func TestLoadKeepsNATSCredentialsOutOfErrors(t *testing.T) {
 		t.Errorf("err = %v, want a NATS_URL problem that does not echo the URL", err)
 	}
 }
+
+func TestLoadReadsPlatformAdmins(t *testing.T) {
+	base := map[string]string{"DATABASE_URL": dbURL, "SUPABASE_URL": supabaseURL}
+	c, err := config.Load(env(base))
+	if err != nil || len(c.PlatformAdmins) != 0 {
+		t.Fatalf("no PLATFORM_ADMIN_USER_IDS: admins %v, err %v; want none", c.PlatformAdmins, err)
+	}
+
+	a, b := "6f1c2f6e-4a0b-4f8e-9a37-1b2c3d4e5f60", "0d9e8f7a-6b5c-4d3e-8f1a-2b3c4d5e6f70"
+	base["PLATFORM_ADMIN_USER_IDS"] = " " + a + " , " + b + ","
+	c, err = config.Load(env(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.PlatformAdmins) != 2 || c.PlatformAdmins[0].String() != a || c.PlatformAdmins[1].String() != b {
+		t.Errorf("admins = %v, want [%s %s]", c.PlatformAdmins, a, b)
+	}
+
+	base["PLATFORM_ADMIN_USER_IDS"] = a + ",not-a-uuid"
+	if _, err := config.Load(env(base)); err == nil || !strings.Contains(err.Error(), "PLATFORM_ADMIN_USER_IDS") {
+		t.Errorf("bad admin id: err = %v, want a PLATFORM_ADMIN_USER_IDS problem", err)
+	}
+}

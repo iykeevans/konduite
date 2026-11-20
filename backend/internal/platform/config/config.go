@@ -7,7 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Config is the configuration shared by the API and worker processes.
@@ -22,6 +25,8 @@ type Config struct {
 	WorkerDrainTimeout time.Duration // WORKER_DRAIN_TIMEOUT
 
 	RuntimeTokenKey SigningKey // RUNTIME_TOKEN_SIGNING_KEY: base64 Ed25519 seed (required in production)
+
+	PlatformAdmins []uuid.UUID // PLATFORM_ADMIN_USER_IDS: comma-separated user ids allowed on /api/v1/admin; empty denies everyone
 }
 
 // SigningKey holds a private key. It formats and marshals as "[redacted]" so
@@ -77,6 +82,7 @@ func Load(getenv func(string) string) (Config, error) {
 	c.ShutdownTimeout = duration(or("API_SHUTDOWN_TIMEOUT", "15s"), "API_SHUTDOWN_TIMEOUT", &problems)
 	c.WorkerDrainTimeout = duration(or("WORKER_DRAIN_TIMEOUT", "30s"), "WORKER_DRAIN_TIMEOUT", &problems)
 	c.RuntimeTokenKey = signingKey(getenv("RUNTIME_TOKEN_SIGNING_KEY"), c.Env, &problems)
+	c.PlatformAdmins = userIDs(getenv("PLATFORM_ADMIN_USER_IDS"), "PLATFORM_ADMIN_USER_IDS", &problems)
 
 	if len(problems) > 0 {
 		return Config{}, fmt.Errorf("invalid configuration: %w", errors.Join(problems...))
@@ -98,6 +104,23 @@ func signingKey(raw, env string, problems *[]error) SigningKey {
 		return SigningKey{}
 	}
 	return SigningKey{key: ed25519.NewKeyFromSeed(seed)}
+}
+
+func userIDs(raw, key string, problems *[]error) []uuid.UUID {
+	var ids []uuid.UUID
+	for _, part := range strings.Split(raw, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		id, err := uuid.Parse(part)
+		if err != nil {
+			*problems = append(*problems, fmt.Errorf("%s: %q is not a user id (UUID)", key, part))
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 var natsSchemes = map[string]bool{"nats": true, "tls": true, "ws": true, "wss": true}

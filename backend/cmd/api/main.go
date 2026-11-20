@@ -16,13 +16,16 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/iykeevans/konduite/backend/internal/admin"
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
 	"github.com/iykeevans/konduite/backend/internal/authz"
 	"github.com/iykeevans/konduite/backend/internal/conversations"
+	"github.com/iykeevans/konduite/backend/internal/deadletters"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
+	"github.com/iykeevans/konduite/backend/internal/platform/nats"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
 	"github.com/iykeevans/konduite/backend/internal/runtimes"
 	"github.com/iykeevans/konduite/backend/internal/store"
@@ -52,6 +55,12 @@ func run() error {
 	}
 	defer pool.Close()
 
+	bus, err := nats.Connect(cfg.NATSURL, "konduite-api")
+	if err != nil {
+		return err
+	}
+	defer bus.Close()
+
 	tokenKey, ok := cfg.RuntimeTokenKey.Key()
 	if !ok {
 		if _, tokenKey, err = ed25519.GenerateKey(rand.Reader); err != nil {
@@ -68,12 +77,13 @@ func run() error {
 	workspaceHandler := workspaces.NewHandler(workspaces.NewService(workspaces.NewPostgresRepository(pool), az))
 	conversationHandler := conversations.NewHandler(conversations.NewService(
 		conversations.NewPostgresRepository(pool), az))
+	dlqHandler := deadletters.NewHandler(deadletters.NewService(bus, admin.NewAllowlist(cfg.PlatformAdmins)))
 
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
-			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, conversationHandler.Routes},
+			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, conversationHandler.Routes, dlqHandler.Routes},
 			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
