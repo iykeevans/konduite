@@ -109,6 +109,21 @@ type Message struct {
 	CreatedAt      time.Time
 }
 
+type MessageDelivery struct {
+	ID             uuid.UUID
+	WorkspaceID    uuid.UUID
+	MessageID      uuid.UUID
+	ConversationID uuid.UUID
+	SequenceNumber int64
+	RecipientType  string
+	RecipientID    uuid.UUID
+	RuntimeID      *uuid.UUID
+	Status         string
+	CreatedAt      time.Time
+	SentAt         *time.Time
+	AcknowledgedAt *time.Time
+}
+
 type OutboxEvent struct {
 	ID          uuid.UUID
 	EventType   string
@@ -117,6 +132,7 @@ type OutboxEvent struct {
 	Payload     json.RawMessage
 	CreatedAt   time.Time
 	PublishedAt *time.Time
+	Subject     *string
 }
 
 type Project struct {

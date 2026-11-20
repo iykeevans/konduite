@@ -272,3 +272,49 @@ func TestSubject(t *testing.T) {
 		}
 	}
 }
+
+func TestEnqueueStoresTheSubjectOverride(t *testing.T) {
+	out := &fakeOutbox{}
+	ev := connected(uuid.New(), uuid.New())
+	if _, err := events.Enqueue(t.Context(), out, ev); err != nil {
+		t.Fatal(err)
+	}
+	ev.Subject = "agenthub.rt.5b0c7b1e-8f4c-4c1a-9d43-0e6f3b6f2a11.deliver"
+	if _, err := events.Enqueue(t.Context(), out, ev); err != nil {
+		t.Fatal(err)
+	}
+	if out.rows[0].Subject != nil {
+		t.Errorf("subject = %q, want nil without an override", *out.rows[0].Subject)
+	}
+	if out.rows[1].Subject == nil || *out.rows[1].Subject != ev.Subject {
+		t.Errorf("subject = %v, want %q", out.rows[1].Subject, ev.Subject)
+	}
+	if out.rows[1].EventType != "runtime.connected" {
+		t.Errorf("event type = %q, want the envelope type", out.rows[1].EventType)
+	}
+}
+
+func TestEnqueueRejectsBadSubjects(t *testing.T) {
+	for _, subject := range []string{
+		"rt.x.deliver",
+		"dlq.agenthub.rt.x",
+		"agenthub.",
+		"agenthub",
+		"agenthub.rt..deliver",
+		"agenthub.rt.*.deliver",
+		"agenthub.rt.>",
+		"agenthub.rt.x y",
+	} {
+		t.Run(subject, func(t *testing.T) {
+			ev := connected(uuid.New(), uuid.New())
+			ev.Subject = subject
+			out := &fakeOutbox{}
+			if _, err := events.Enqueue(t.Context(), out, ev); !errors.Is(err, events.ErrInvalid) {
+				t.Errorf("err = %v, want ErrInvalid", err)
+			}
+			if len(out.rows) != 0 {
+				t.Errorf("inserted %d rows, want none", len(out.rows))
+			}
+		})
+	}
+}

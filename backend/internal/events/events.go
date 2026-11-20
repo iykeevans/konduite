@@ -1,6 +1,7 @@
 // Package events builds event envelopes and writes them to the transactional
-// outbox. The relay publishes each outbox row unchanged to Subject(type) with
-// Nats-Msg-Id set to the row id, which is also the envelope id.
+// outbox. The relay publishes each outbox row unchanged to Subject(type), or
+// to the event's Subject override, with Nats-Msg-Id set to the row id, which
+// is also the envelope id.
 package events
 
 import (
@@ -10,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -37,6 +39,10 @@ type Event struct {
 	AggregateID uuid.UUID
 	CausationID *uuid.UUID
 	Data        any
+	// Subject, when set, replaces Subject(Type) as the NATS subject, for
+	// events addressed to one recipient such as agenthub.rt.<id>.deliver.
+	// It must be a literal subject under agenthub.
+	Subject string
 }
 
 // Outbox inserts outbox rows. *store.Queries satisfies it.
@@ -63,6 +69,13 @@ func Enqueue(ctx context.Context, q Outbox, ev Event) (uuid.UUID, error) {
 	}
 	if ev.AggregateID == uuid.Nil {
 		return uuid.Nil, fmt.Errorf("%w: aggregate id is required", ErrInvalid)
+	}
+	var subject *string
+	if ev.Subject != "" {
+		if !literalSubject(ev.Subject) {
+			return uuid.Nil, fmt.Errorf("%w: subject %q is not a literal subject under agenthub.", ErrInvalid, ev.Subject)
+		}
+		subject = &ev.Subject
 	}
 	data, err := json.Marshal(ev.Data)
 	if err != nil {
@@ -99,10 +112,24 @@ func Enqueue(ctx context.Context, q Outbox, ev Event) (uuid.UUID, error) {
 		AggregateID: ev.AggregateID,
 		WorkspaceID: &workspace,
 		Payload:     payload,
+		Subject:     subject,
 	}); err != nil {
 		return uuid.Nil, fmt.Errorf("insert %s outbox event: %w", ev.Type, err)
 	}
 	return id, nil
+}
+
+func literalSubject(s string) bool {
+	rest, ok := strings.CutPrefix(s, "agenthub.")
+	if !ok {
+		return false
+	}
+	for _, tok := range strings.Split(rest, ".") {
+		if tok == "" || tok == "*" || tok == ">" || strings.ContainsAny(tok, " \t\r\n") {
+			return false
+		}
+	}
+	return true
 }
 
 func correlationID(ctx context.Context, eventID uuid.UUID) uuid.UUID {
