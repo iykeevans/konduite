@@ -71,6 +71,10 @@ func SecretValue(s string) bool {
 	return authSchemeValue.MatchString(s) || jwtValue.MatchString(s) || urlPassword.MatchString(s)
 }
 
+// Scrub masks credential-looking values in s, for error text that leaves
+// the process outside a log record, such as a dead-letter header.
+func Scrub(s string) string { return scrub(s) }
+
 func scrub(s string) string {
 	s = authSchemeValue.ReplaceAllString(s, "$1 "+Redacted)
 	s = jwtValue.ReplaceAllString(s, Redacted)
