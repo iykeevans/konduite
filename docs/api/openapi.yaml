@@ -242,9 +242,11 @@ paths:
     post:
       summary: Start a conversation in a workspace.
       description: |
-        Every workspace member may create one. The caller becomes `created_by`
-        and the first participant (type `user`). Non-members get 404 as if
-        the workspace did not exist.
+        Every workspace member may create a workspace-wide one. One with a
+        `project_id` also needs `project.contribute` on that project (workspace
+        owner/admin, or project maintainer/contributor). The caller becomes
+        `created_by` and the first participant (type `user`). Non-members get
+        404 as if the workspace did not exist.
       requestBody:
         required: true
         content:
@@ -268,6 +270,12 @@ paths:
                   data: { $ref: "#/components/schemas/Conversation" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller may see the project but not contribute to it (a project viewer, or a member without a project role).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
           description: The workspace does not exist or the caller is not a member.
           content:
@@ -282,7 +290,10 @@ paths:
                 $ref: "#/components/schemas/ErrorEnvelope"
     get:
       summary: List a workspace's conversations, newest first.
-      description: Every workspace member sees every conversation in it. Items omit `participants`.
+      description: |
+        Every workspace member sees the workspace-wide conversations. Ones in a
+        project are listed only to callers who can view that project (workspace
+        owner/admin, or any project role). Items omit `participants`.
       parameters:
         - { name: workspace_id, in: query, required: true, schema: { type: string, format: uuid } }
         - { name: project_id, in: query, description: Only conversations in this project., schema: { type: string, format: uuid } }
@@ -303,8 +314,14 @@ paths:
                   meta: { $ref: "#/components/schemas/PageMeta" }
         "401":
           $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: project_id names a project the caller cannot view.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
         "404":
-          description: The workspace does not exist or the caller is not a member.
+          description: The workspace does not exist, the caller is not a member, or project_id is not a project in it.
           content:
             application/json:
               schema:
@@ -333,7 +350,98 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthenticated"
         "404":
-          description: No such conversation, or it is in a workspace the caller is not a member of. Both get the same response.
+          description: No such conversation, it is in a workspace the caller is not a member of, or it is in a project the caller cannot view. All get the same response.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations/{id}/participants:
+    post:
+      summary: Add a user, agent or runtime to a conversation.
+      description: |
+        Needs the same right as contributing to the conversation: any workspace
+        member for a workspace-wide one, `project.contribute` for one in a
+        project. A user participant must be able to read the conversation; an
+        agent or runtime must belong to its workspace. Idempotent: adding an
+        existing participant returns 200 with the stored one.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, id]
+              properties:
+                type: { type: string, enum: [user, agent, runtime] }
+                id: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Added.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Participant" }
+        "200":
+          description: Already a participant; the stored participant, unchanged.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Participant" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can read the conversation but not contribute to it (a project viewer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No such conversation, or the caller cannot read it. Same response as GET.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, an unknown type, a bad id, a user who cannot read the conversation, or an agent/runtime outside its workspace (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations/{id}/participants/{type}/{participant_id}:
+    delete:
+      summary: Remove a participant from a conversation.
+      description: Same permission as adding. Idempotent; removing someone who is not a participant also returns 204.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: type, in: path, required: true, schema: { type: string, enum: [user, agent, runtime] } }
+        - { name: participant_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: Removed, or was not a participant.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can read the conversation but not contribute to it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No such conversation, the caller cannot read it, or an id in the path is not a UUID.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: An unknown participant type (details.fields).
           content:
             application/json:
               schema:
@@ -521,13 +629,14 @@ components:
         participants:
           type: array
           description: Present on create and get, omitted in lists.
-          items:
-            type: object
-            required: [type, id, joined_at]
-            properties:
-              type: { type: string, enum: [user, agent, runtime] }
-              id: { type: string, format: uuid, description: A user, agent or runtime id depending on type. }
-              joined_at: { type: string, format: date-time }
+          items: { $ref: "#/components/schemas/Participant" }
+    Participant:
+      type: object
+      required: [type, id, joined_at]
+      properties:
+        type: { type: string, enum: [user, agent, runtime] }
+        id: { type: string, format: uuid, description: A user, agent or runtime id depending on type. }
+        joined_at: { type: string, format: date-time }
     ErrorEnvelope:
       type: object
       required: [error]
