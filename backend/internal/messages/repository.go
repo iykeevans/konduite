@@ -69,7 +69,8 @@ func (r postgresRepository) Post(ctx context.Context, in Posting) (Message, bool
 
 func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Message, error) {
 	rows, err := store.New(r.pool).ListMessagesAfter(ctx, store.ListMessagesAfterParams{
-		ConversationID: f.ConversationID, AfterSeq: f.AfterSeq, RowLimit: int32(f.Limit),
+		ConversationID: f.ConversationID, AfterSeq: f.AfterSeq,
+		RowLimit: int32(min(f.Limit, 1000)), //nolint:gosec // bounded just above
 	})
 	if err != nil {
 		return nil, err
