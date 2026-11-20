@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/iykeevans/konduite/packages/contracts/schemas/events/message.created.v1.json",
+  "title": "MessageCreated",
+  "description": "A message was stored in a conversation. Carries what routing needs, not the content: consumers read the message by id, so untrusted text never travels on the bus.",
+  "type": "object",
+  "required": ["message_id", "conversation_id", "sequence_number", "sender", "message_type"],
+  "additionalProperties": false,
+  "properties": {
+    "message_id": { "type": "string", "format": "uuid" },
+    "conversation_id": { "type": "string", "format": "uuid" },
+    "sequence_number": {
+      "description": "Position in the conversation, gapless from 1. Deliveries are pushed in this order.",
+      "type": "integer",
+      "minimum": 1
+    },
+    "sender": {
+      "title": "MessageSender",
+      "type": "object",
+      "required": ["type", "id"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "type": "string", "enum": ["user", "agent", "runtime"] },
+        "id": { "type": "string", "format": "uuid" }
+      }
+    },
+    "message_type": { "type": "string", "enum": ["text", "task", "system"] },
+    "parent_id": { "type": "string", "format": "uuid" }
+  }
+}
