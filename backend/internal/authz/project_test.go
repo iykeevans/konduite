@@ -93,7 +93,7 @@ func TestCanProjectRoleByAction(t *testing.T) {
 					fakeMemberships: fakeMemberships{{ws, uid}: acc.ws},
 					projects:        map[uuid.UUID]fakeProject{proj: {ws, map[uuid.UUID]authz.ProjectRole{uid: acc.proj}}},
 				}
-				a := authz.New(dir)
+				a := authz.NewWithProjects(dir)
 
 				assertKind(t, a.Can(t.Context(), user(uid), tt.action, authz.Project(proj)), tt.want[i])
 			})
@@ -238,8 +238,8 @@ func TestCanProjectWithoutProjectLookupIsInternal(t *testing.T) {
 
 	err := a.Can(t.Context(), user(uuid.New()), authz.ActionViewProject, authz.Project(uuid.New()))
 
-	if err == nil {
-		t.Fatal("err = nil, want an error when the Memberships cannot look up projects")
+	if !errors.Is(err, authz.ErrNoProjectLookup) {
+		t.Fatalf("err = %v, want ErrNoProjectLookup when the Memberships cannot look up projects", err)
 	}
 	if _, ok := errs.As(err); ok {
 		t.Errorf("err = %v is a domain error; missing wiring is a server bug and must be a 500", err)
@@ -250,4 +250,17 @@ type failingGrants struct{ err error }
 
 func (f failingGrants) ProjectActions(context.Context, uuid.UUID, uuid.UUID) ([]authz.Action, error) {
 	return nil, f.err
+}
+
+func TestNewWithProjectsChecksProjectsThroughTheDirectory(t *testing.T) {
+	ws, proj, uid := uuid.New(), uuid.New(), uuid.New()
+	dir := fakeDirectory{
+		fakeMemberships: fakeMemberships{{ws, uid}: authz.RoleDeveloper},
+		projects:        map[uuid.UUID]fakeProject{proj: {ws, map[uuid.UUID]authz.ProjectRole{uid: authz.ProjectRoleViewer}}},
+	}
+	a := authz.NewWithProjects(dir, authz.WithGrants(kindAgent, fakeGrants{}))
+
+	assertKind(t, a.Can(t.Context(), user(uid), authz.ActionViewProject, authz.Project(proj)), "")
+	assertKind(t, a.Can(t.Context(), user(uid), authz.ActionContribute, authz.Project(proj)), errs.KindForbidden)
+	assertKind(t, a.Can(t.Context(), user(uid), authz.ActionViewWorkspace, authz.Workspace(ws)), "")
 }

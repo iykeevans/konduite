@@ -36,7 +36,7 @@ func TestCanWithStoreMemberships(t *testing.T) {
 		}
 	}
 
-	a := authz.New(authz.StoreMemberships(store.New(pool)))
+	a := authz.NewWithProjects(authz.StoreMemberships(store.New(pool)))
 
 	tests := []struct {
 		name   string
@@ -102,7 +102,7 @@ func TestCanProjectWithStoreMemberships(t *testing.T) {
 		exec(`INSERT INTO project_members (project_id, user_id, role) VALUES ($1, $2, $3)`, m.project, m.user, m.role)
 	}
 
-	a := authz.New(authz.StoreMemberships(store.New(pool)))
+	a := authz.NewWithProjects(authz.StoreMemberships(store.New(pool)))
 
 	tests := []struct {
 		name    string
