@@ -79,7 +79,7 @@ func (r postgresRepository) Get(ctx context.Context, id uuid.UUID) (Conversation
 }
 
 func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Conversation, error) {
-	params := store.ListConversationsParams{WorkspaceID: f.WorkspaceID, ProjectID: f.ProjectID, RowLimit: int32(f.Limit)} //nolint:gosec // Limit is at most 101, set by the service.
+	params := store.ListConversationsParams{WorkspaceID: f.WorkspaceID, ProjectID: f.ProjectID, ViewerID: f.ViewerID, RowLimit: int32(f.Limit)} //nolint:gosec // Limit is at most 101, set by the service.
 	if f.After != nil {
 		params.AfterCreatedAt = &f.After.CreatedAt
 		params.AfterID = &f.After.ID
@@ -93,6 +93,60 @@ func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Conversat
 		out = append(out, fromRow(row))
 	}
 	return out, nil
+}
+
+func (r postgresRepository) AddParticipant(ctx context.Context, conversationID, workspaceID uuid.UUID, kind ParticipantKind, id uuid.UUID) (Participant, bool, error) {
+	var (
+		out     Participant
+		created bool
+	)
+	err := db.WithTx(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		q := store.New(tx)
+		var (
+			inWorkspace = true
+			err         error
+		)
+		switch kind {
+		case KindAgent:
+			inWorkspace, err = q.AgentInWorkspace(ctx, store.AgentInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
+		case KindRuntime:
+			inWorkspace, err = q.RuntimeInWorkspace(ctx, store.RuntimeInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
+		}
+		if err != nil {
+			return err
+		}
+		if !inWorkspace {
+			return ErrParticipantNotInWorkspace
+		}
+		row, err := q.AddConversationParticipant(ctx, store.AddConversationParticipantParams{
+			ConversationID: conversationID, ParticipantType: string(kind), ParticipantID: id,
+		})
+		if err == nil {
+			out, created = fromParticipantRow(row), true
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		row, err = q.GetConversationParticipant(ctx, store.GetConversationParticipantParams{
+			ConversationID: conversationID, ParticipantType: string(kind), ParticipantID: id,
+		})
+		if err != nil {
+			return err
+		}
+		out = fromParticipantRow(row)
+		return nil
+	})
+	if err != nil {
+		return Participant{}, false, err
+	}
+	return out, created, nil
+}
+
+func (r postgresRepository) RemoveParticipant(ctx context.Context, conversationID uuid.UUID, kind ParticipantKind, id uuid.UUID) error {
+	return store.New(r.pool).DeleteConversationParticipant(ctx, store.DeleteConversationParticipantParams{
+		ConversationID: conversationID, ParticipantType: string(kind), ParticipantID: id,
+	})
 }
 
 func fromRow(r store.Conversation) Conversation {

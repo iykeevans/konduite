@@ -27,7 +27,7 @@ var (
 
 const (
 	defaultTimeout = 5 * time.Minute
-	revokeTimeout  = 15 * time.Second
+	serverTimeout  = 15 * time.Second
 )
 
 // Client runs login and logout. Open shows a URL in the user's browser and
@@ -96,7 +96,7 @@ func (c Client) Login(ctx context.Context, in LoginInput) (Runtime, error) {
 		return Runtime{}, fmt.Errorf("register runtime: %w", err)
 	}
 	if err := c.Keychain.Set(account, reg.RefreshCredential); err != nil {
-		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
+		rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), serverTimeout)
 		defer cancel()
 		if rerr := api.revoke(rctx, reg.RefreshCredential); rerr != nil {
 			return Runtime{}, fmt.Errorf("store the runtime credential: %w; revoking it also failed (%w), so delete runtime %s from the dashboard", err, rerr, reg.RuntimeID)
@@ -119,7 +119,7 @@ func (c Client) Logout(ctx context.Context, cfg config.Config) (LogoutResult, er
 	}
 
 	res := LogoutResult{WasLoggedIn: true}
-	rctx, cancel := context.WithTimeout(ctx, revokeTimeout)
+	rctx, cancel := context.WithTimeout(ctx, serverTimeout)
 	defer cancel()
 	err = server{url: account, http: c.HTTP}.revoke(rctx, cred)
 	var apiErr *APIError
@@ -136,6 +136,60 @@ func (c Client) Logout(ctx context.Context, cfg config.Config) (LogoutResult, er
 		return res, err
 	}
 	return res, nil
+}
+
+// RemoteRuntime is the server's view of this machine's runtime.
+type RemoteRuntime struct {
+	ID                   string     `json:"id"`
+	WorkspaceID          string     `json:"workspace_id"`
+	Name                 string     `json:"name"`
+	Revoked              bool       `json:"revoked"`
+	CredentialLastUsedAt *time.Time `json:"credential_last_used_at"`
+	CreatedAt            time.Time  `json:"created_at"`
+}
+
+// Status is what Status found. Remote is set when the server accepted the
+// stored credential; otherwise Rejected (the server refused it) or RemoteErr
+// (it could not be asked) says why not.
+type Status struct {
+	LoggedIn  bool
+	Remote    *RemoteRuntime
+	Rejected  bool
+	RemoteErr error
+}
+
+// Status reports whether a credential is stored for cfg's server and, if so,
+// asks the server about the runtime by exchanging the credential for a
+// short-lived access token. Only a keychain failure is an error.
+func (c Client) Status(ctx context.Context, cfg config.Config) (Status, error) {
+	account := accountFor(cfg)
+	cred, err := c.Keychain.Get(account)
+	if errors.Is(err, security.ErrNotFound) {
+		return Status{}, nil
+	}
+	if err != nil {
+		return Status{}, err
+	}
+
+	st := Status{LoggedIn: true}
+	sctx, cancel := context.WithTimeout(ctx, serverTimeout)
+	defer cancel()
+	srv := server{url: account, http: c.HTTP}
+	tok, err := srv.accessToken(sctx, cred)
+	if err == nil {
+		var rt RemoteRuntime
+		if rt, err = srv.self(sctx, tok); err == nil {
+			st.Remote = &rt
+			return st, nil
+		}
+	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
+		st.Rejected = true
+	} else {
+		st.RemoteErr = err
+	}
+	return st, nil
 }
 
 // LoggedIn reports whether the keychain holds a credential for cfg's server.

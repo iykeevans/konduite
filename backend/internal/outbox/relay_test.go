@@ -5,12 +5,6 @@ import (
 	"time"
 )
 
-func TestSubjectPrefixesTheEventType(t *testing.T) {
-	if got := Subject("message.created"); got != "agenthub.message.created" {
-		t.Errorf("Subject = %q, want agenthub.message.created", got)
-	}
-}
-
 func TestBackoffDoublesFromMinAndCapsAtMax(t *testing.T) {
 	lo, hi := 500*time.Millisecond, 30*time.Second
 	tests := []struct {

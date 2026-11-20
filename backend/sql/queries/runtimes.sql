@@ -19,3 +19,23 @@ UPDATE runtime_credentials SET last_used_at = now() WHERE id = $1;
 
 -- name: DeleteRuntimeCredential :exec
 DELETE FROM runtime_credentials WHERE id = $1;
+
+-- name: GetRuntime :one
+SELECT r.id, r.workspace_id, r.owner_id, r.name, r.created_at, r.updated_at,
+       c.last_used_at AS credential_last_used_at,
+       (c.id IS NULL)::boolean AS revoked
+FROM agent_runtime_instances r
+LEFT JOIN runtime_credentials c ON c.runtime_id = r.id
+WHERE r.id = $1;
+
+-- name: ListRuntimes :many
+SELECT r.id, r.workspace_id, r.owner_id, r.name, r.created_at, r.updated_at,
+       c.last_used_at AS credential_last_used_at,
+       (c.id IS NULL)::boolean AS revoked
+FROM agent_runtime_instances r
+LEFT JOIN runtime_credentials c ON c.runtime_id = r.id
+WHERE r.workspace_id = @workspace_id
+  AND (sqlc.narg(after_created_at)::timestamptz IS NULL
+       OR (r.created_at, r.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::uuid))
+ORDER BY r.created_at DESC, r.id DESC
+LIMIT @row_limit;

@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
@@ -25,6 +25,7 @@ import (
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
+	"github.com/iykeevans/konduite/backend/internal/projects"
 	"github.com/iykeevans/konduite/backend/internal/runtimes"
 	"github.com/iykeevans/konduite/backend/internal/store"
 	"github.com/iykeevans/konduite/backend/internal/workspaces"
@@ -60,13 +61,11 @@ func run() error {
 		}
 		slog.Warn("RUNTIME_TOKEN_SIGNING_KEY not set: signing runtime tokens with a throwaway key, so they stop working on restart")
 	}
-	az := authz.New(authz.StoreMemberships(store.New(pool)))
-	canRegister := func(ctx context.Context, p auth.Principal, ws uuid.UUID) error {
-		return az.Can(ctx, p, authz.ActionRegisterRuntime, authz.Workspace(ws))
-	}
+	az := newAuthorizer(pool)
 	runtimeHandler := runtimes.NewHandler(runtimes.NewService(
-		runtimes.NewPostgresRepository(pool), canRegister, tokenKey))
+		runtimes.NewPostgresRepository(pool), az, tokenKey))
 	workspaceHandler := workspaces.NewHandler(workspaces.NewService(workspaces.NewPostgresRepository(pool), az))
+	projectHandler := projects.NewHandler(projects.NewService(projects.NewPostgresRepository(pool), az))
 	conversationHandler := conversations.NewHandler(conversations.NewService(
 		conversations.NewPostgresRepository(pool), az))
 	memberHandler := members.NewHandler(members.NewService(members.NewPostgresRepository(pool), az))
@@ -75,7 +74,7 @@ func run() error {
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
-			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, conversationHandler.Routes, memberHandler.Routes},
+			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, projectHandler.Routes, conversationHandler.Routes, memberHandler.Routes},
 			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -91,4 +90,8 @@ func run() error {
 	}
 	slog.Info("api stopped")
 	return nil
+}
+
+func newAuthorizer(pool *pgxpool.Pool) *authz.Authorizer {
+	return authz.NewWithProjects(authz.StoreMemberships(store.New(pool)))
 }

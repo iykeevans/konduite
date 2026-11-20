@@ -53,6 +53,7 @@ const (
 	ActionViewProjects    Action = "workspace.projects.view"
 	ActionCreateProject   Action = "workspace.projects.create"
 	ActionRegisterRuntime Action = "workspace.runtimes.register"
+	ActionViewRuntimes    Action = "workspace.runtimes.view"
 	ActionViewAuditLog    Action = "workspace.audit_log.view"
 
 	ActionViewConversations  Action = "workspace.conversations.view"
@@ -70,6 +71,7 @@ var allowed = map[Action][]Role{
 	ActionViewProjects:    everyone,
 	ActionCreateProject:   {RoleOwner, RoleAdmin, RoleProjectManager},
 	ActionRegisterRuntime: {RoleOwner, RoleAdmin, RoleDeveloper},
+	ActionViewRuntimes:    everyone,
 	ActionViewAuditLog:    {RoleOwner, RoleAdmin},
 
 	ActionViewConversations:  everyone,
@@ -97,14 +99,28 @@ type Memberships interface {
 
 // Authorizer answers authorization questions. It is safe for concurrent use.
 type Authorizer struct {
-	members Memberships
-	grants  map[auth.Kind]Grants
+	members  Memberships
+	projects ProjectMemberships
+	grants   map[auth.Kind]Grants
 }
 
-// New returns an Authorizer that reads roles from members. Project resources
-// need members to also implement ProjectMemberships.
+// New returns an Authorizer that reads roles from members. It checks Project
+// resources only if members also implements ProjectMemberships; otherwise
+// they fail with ErrNoProjectLookup. Production wiring uses NewWithProjects,
+// which makes the project lookup a compile-time requirement.
 func New(members Memberships, opts ...Option) *Authorizer {
-	a := &Authorizer{members: members, grants: map[auth.Kind]Grants{}}
+	projects, _ := members.(ProjectMemberships)
+	return newAuthorizer(members, projects, opts)
+}
+
+// NewWithProjects returns an Authorizer that checks both Workspace and
+// Project resources through d.
+func NewWithProjects(d Directory, opts ...Option) *Authorizer {
+	return newAuthorizer(d, d, opts)
+}
+
+func newAuthorizer(members Memberships, projects ProjectMemberships, opts []Option) *Authorizer {
+	a := &Authorizer{members: members, projects: projects, grants: map[auth.Kind]Grants{}}
 	for _, opt := range opts {
 		opt(a)
 	}
