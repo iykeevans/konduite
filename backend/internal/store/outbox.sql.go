@@ -13,9 +13,9 @@ import (
 )
 
 const insertOutboxEvent = `-- name: InsertOutboxEvent :one
-INSERT INTO outbox_events (id, event_type, aggregate_id, workspace_id, payload)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, event_type, aggregate_id, workspace_id, payload, created_at, published_at
+INSERT INTO outbox_events (id, event_type, aggregate_id, workspace_id, payload, subject)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, event_type, aggregate_id, workspace_id, payload, created_at, published_at, subject
 `
 
 type InsertOutboxEventParams struct {
@@ -24,6 +24,7 @@ type InsertOutboxEventParams struct {
 	AggregateID uuid.UUID
 	WorkspaceID *uuid.UUID
 	Payload     json.RawMessage
+	Subject     *string
 }
 
 func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventParams) (OutboxEvent, error) {
@@ -33,6 +34,7 @@ func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventPa
 		arg.AggregateID,
 		arg.WorkspaceID,
 		arg.Payload,
+		arg.Subject,
 	)
 	var i OutboxEvent
 	err := row.Scan(
@@ -43,12 +45,13 @@ func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventPa
 		&i.Payload,
 		&i.CreatedAt,
 		&i.PublishedAt,
+		&i.Subject,
 	)
 	return i, err
 }
 
 const listUnpublishedOutboxEvents = `-- name: ListUnpublishedOutboxEvents :many
-SELECT id, event_type, aggregate_id, workspace_id, payload, created_at, published_at FROM outbox_events
+SELECT id, event_type, aggregate_id, workspace_id, payload, created_at, published_at, subject FROM outbox_events
 WHERE published_at IS NULL
 ORDER BY created_at
 LIMIT $1
@@ -71,6 +74,7 @@ func (q *Queries) ListUnpublishedOutboxEvents(ctx context.Context, limit int32) 
 			&i.Payload,
 			&i.CreatedAt,
 			&i.PublishedAt,
+			&i.Subject,
 		); err != nil {
 			return nil, err
 		}

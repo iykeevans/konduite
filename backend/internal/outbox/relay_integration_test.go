@@ -139,6 +139,24 @@ func TestPublishPendingPublishesPayloadUnchangedAndMarksRows(t *testing.T) {
 	}
 }
 
+func TestPublishPendingUsesTheRowSubjectWhenSet(t *testing.T) {
+	pool, srv := dbtest.New(t), ensured(t)
+	msgs := subscribe(t, srv)
+	id := insert(t, pool, "runtime.deliver")
+	subject := "agenthub.rt." + uuid.NewString() + ".deliver"
+	if _, err := pool.Exec(t.Context(), `UPDATE outbox_events SET subject = $2 WHERE id = $1`, id, subject); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := outbox.NewRelay(pool, srv.Client, outbox.Config{}).PublishPending(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	m := receive(t, msgs, 5*time.Second)
+	if m.Subject != subject || m.Header.Get(natsgo.MsgIdHdr) != id.String() {
+		t.Errorf("published on %q with id %q, want %q with id %s", m.Subject, m.Header.Get(natsgo.MsgIdHdr), subject, id)
+	}
+}
+
 func TestPublishPendingDrainsMoreThanOneBatch(t *testing.T) {
 	pool, srv := dbtest.New(t), ensured(t)
 	for range 25 {

@@ -1,5 +1,5 @@
 -- name: ClaimOutboxBatch :many
-SELECT id, event_type, payload FROM outbox_events
+SELECT id, event_type, subject, payload FROM outbox_events
 WHERE published_at IS NULL
 ORDER BY created_at
 LIMIT $1
