@@ -109,7 +109,9 @@ func (v *Verifier) Verify(ctx context.Context, token string) (Principal, error) 
 	if err != nil || id == uuid.Nil {
 		return Principal{}, invalid(errors.New("subject is not a user id"))
 	}
-	return Principal{Kind: KindUser, ID: id}, nil
+	var email string
+	_ = tok.Get("email", &email)
+	return Principal{Kind: KindUser, ID: id, Email: strings.ToLower(strings.TrimSpace(email))}, nil
 }
 
 func (v *Verifier) keySet(ctx context.Context, kid string) (jwk.Set, error) {
