@@ -14,3 +14,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [Workspace membership](workspace-membership.md) — invitation tokens hashed and shown once, accept link in a URL fragment POSTed in a body, email-bound accept, last-owner guard under row locks.
 - [Consumer retry and dead-letter](consumer-retry-and-dlq.md) — every consumer uses nats.Client.Consume; publish DLQ then Term; replay gets a new msg id; admin allow-list gate.
 - [Model routing](model-routing.md) — opusplan + Haiku subagents, ruflo and hooks off in this repo; which tier of ticket gets which model.
+- [Message routing](message-routing.md) — message.created → message_deliveries for every participant but the sender; UNIQUE(message_id, recipient_id) is the dedupe; one runtime.deliver per runtime on agenthub.rt.<id>.deliver via the outbox subject override; user rows have no runtime.
