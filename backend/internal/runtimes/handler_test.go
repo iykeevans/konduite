@@ -206,3 +206,162 @@ func TestRevokeEndpointRejects(t *testing.T) {
 		t.Errorf("%d credentials left, want the real one kept", len(f.repo.credentials))
 	}
 }
+
+func get(t *testing.T, h http.Handler, target, bearer string) (*httptest.ResponseRecorder, map[string]any) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, target, nil)
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
+	}
+	h.ServeHTTP(rec, req)
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("response is not JSON: %v (body %q)", err, rec.Body.String())
+	}
+	return rec, body
+}
+
+func assertNoCredential(t *testing.T, rec *httptest.ResponseRecorder, cred string) {
+	t.Helper()
+	body := rec.Body.String()
+	if strings.Contains(body, cred) || strings.Contains(body, "refresh_credential") || strings.Contains(body, "secret") {
+		t.Errorf("response exposes credential material: %s", body)
+	}
+}
+
+func TestGetRuntimeOverHTTP(t *testing.T) {
+	f := newFixture(t)
+	cred := register(t, f)
+	_, list := get(t, router(f, &f.user), "/api/v1/runtimes?workspace_id="+f.workspace.String(), "")
+	id := list["data"].([]any)[0].(map[string]any)["id"].(string)
+
+	rec, body := get(t, router(f, &f.user), "/api/v1/runtimes/"+id, "")
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	d := body["data"].(map[string]any)
+	if d["id"] != id || d["workspace_id"] != f.workspace.String() || d["owner_id"] != f.user.ID.String() ||
+		d["name"] != "laptop" || d["revoked"] != false || d["created_at"] == nil {
+		t.Errorf("data = %v, want the registered laptop", d)
+	}
+	if _, ok := d["credential_last_used_at"]; !ok {
+		t.Errorf("data = %v, want credential_last_used_at (null until first exchange)", d)
+	}
+	assertNoCredential(t, rec, cred)
+}
+
+func TestGetRuntimeOverHTTPRejects(t *testing.T) {
+	f := newFixture(t)
+	register(t, f)
+	_, list := get(t, router(f, &f.user), "/api/v1/runtimes?workspace_id="+f.workspace.String(), "")
+	id := list["data"].([]any)[0].(map[string]any)["id"].(string)
+	stranger := auth.Principal{Kind: auth.KindUser, ID: uuid.New()}
+
+	tests := []struct {
+		name   string
+		caller *auth.Principal
+		target string
+		status int
+	}{
+		{"no principal", nil, "/api/v1/runtimes/" + id, http.StatusUnauthorized},
+		{"non-member", &stranger, "/api/v1/runtimes/" + id, http.StatusNotFound},
+		{"unknown id", &f.user, "/api/v1/runtimes/" + uuid.NewString(), http.StatusNotFound},
+		{"malformed id", &f.user, "/api/v1/runtimes/laptop", http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, _ := get(t, router(f, tt.caller), tt.target, "")
+			if rec.Code != tt.status {
+				t.Errorf("status = %d, want %d (%s)", rec.Code, tt.status, rec.Body)
+			}
+		})
+	}
+}
+
+func TestListRuntimesOverHTTPPages(t *testing.T) {
+	f := newFixture(t)
+	creds := []string{register(t, f), register(t, f), register(t, f)}
+	h := router(f, &f.user)
+
+	rec, body := get(t, h, "/api/v1/runtimes?limit=2&workspace_id="+f.workspace.String(), "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	meta := body["meta"].(map[string]any)
+	if len(body["data"].([]any)) != 2 || meta["has_more"] != true || meta["next_cursor"] == "" {
+		t.Fatalf("first page = %s, want 2 items and a cursor", rec.Body)
+	}
+	for _, c := range creds {
+		assertNoCredential(t, rec, c)
+	}
+
+	rec, body = get(t, h, "/api/v1/runtimes?limit=2&workspace_id="+f.workspace.String()+
+		"&cursor="+url.QueryEscape(meta["next_cursor"].(string)), "")
+	if rec.Code != http.StatusOK || len(body["data"].([]any)) != 1 || body["meta"].(map[string]any)["has_more"] != false {
+		t.Errorf("second page = %d %s, want 1 item and no more", rec.Code, rec.Body)
+	}
+}
+
+func TestListRuntimesOverHTTPRejects(t *testing.T) {
+	f := newFixture(t)
+	stranger := auth.Principal{Kind: auth.KindUser, ID: uuid.New()}
+	ws := f.workspace.String()
+	tests := []struct {
+		name   string
+		caller *auth.Principal
+		query  string
+		status int
+	}{
+		{"no principal", nil, "workspace_id=" + ws, http.StatusUnauthorized},
+		{"non-member", &stranger, "workspace_id=" + ws, http.StatusNotFound},
+		{"no workspace", &f.user, "", http.StatusUnprocessableEntity},
+		{"bad workspace", &f.user, "workspace_id=acme", http.StatusUnprocessableEntity},
+		{"limit too big", &f.user, "limit=101&workspace_id=" + ws, http.StatusUnprocessableEntity},
+		{"bad cursor", &f.user, "cursor=nope&workspace_id=" + ws, http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, _ := get(t, router(f, tt.caller), "/api/v1/runtimes?"+tt.query, "")
+			if rec.Code != tt.status {
+				t.Errorf("status = %d, want %d (%s)", rec.Code, tt.status, rec.Body)
+			}
+		})
+	}
+}
+
+func TestSelfEndpointReturnsTheTokensRuntime(t *testing.T) {
+	f := newFixture(t)
+	cred := register(t, f)
+	_, tok := post(t, router(f, nil), "/v1/runtime/token", `{"refresh_credential":"`+cred+`"}`)
+	access, _ := tok.Data["access_token"].(string)
+
+	rec, body := get(t, router(f, nil), "/v1/runtime/self", access)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+	d := body["data"].(map[string]any)
+	if d["workspace_id"] != f.workspace.String() || d["name"] != "laptop" || d["revoked"] != false {
+		t.Errorf("data = %v, want the registered laptop", d)
+	}
+	assertNoCredential(t, rec, cred)
+}
+
+func TestSelfEndpointRejects(t *testing.T) {
+	f := newFixture(t)
+	cred := register(t, f)
+	for name, bearer := range map[string]string{
+		"no token":           "",
+		"refresh credential": cred,
+		"garbage":            "nope",
+	} {
+		t.Run(name, func(t *testing.T) {
+			rec, _ := get(t, router(f, nil), "/v1/runtime/self", bearer)
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("status = %d, want 401 (%s)", rec.Code, rec.Body)
+			}
+		})
+	}
+}

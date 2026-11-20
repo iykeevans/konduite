@@ -53,6 +53,7 @@ const (
 	ActionViewProjects    Action = "workspace.projects.view"
 	ActionCreateProject   Action = "workspace.projects.create"
 	ActionRegisterRuntime Action = "workspace.runtimes.register"
+	ActionViewRuntimes    Action = "workspace.runtimes.view"
 	ActionViewAuditLog    Action = "workspace.audit_log.view"
 
 	ActionViewConversations  Action = "workspace.conversations.view"
@@ -70,6 +71,7 @@ var allowed = map[Action][]Role{
 	ActionViewProjects:    everyone,
 	ActionCreateProject:   {RoleOwner, RoleAdmin, RoleProjectManager},
 	ActionRegisterRuntime: {RoleOwner, RoleAdmin, RoleDeveloper},
+	ActionViewRuntimes:    everyone,
 	ActionViewAuditLog:    {RoleOwner, RoleAdmin},
 
 	ActionViewConversations:  everyone,

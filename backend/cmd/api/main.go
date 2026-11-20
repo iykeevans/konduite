@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
@@ -60,11 +59,8 @@ func run() error {
 		slog.Warn("RUNTIME_TOKEN_SIGNING_KEY not set: signing runtime tokens with a throwaway key, so they stop working on restart")
 	}
 	az := authz.New(authz.StoreMemberships(store.New(pool)))
-	canRegister := func(ctx context.Context, p auth.Principal, ws uuid.UUID) error {
-		return az.Can(ctx, p, authz.ActionRegisterRuntime, authz.Workspace(ws))
-	}
 	runtimeHandler := runtimes.NewHandler(runtimes.NewService(
-		runtimes.NewPostgresRepository(pool), canRegister, tokenKey))
+		runtimes.NewPostgresRepository(pool), az, tokenKey))
 	workspaceHandler := workspaces.NewHandler(workspaces.NewService(workspaces.NewPostgresRepository(pool), az))
 	conversationHandler := conversations.NewHandler(conversations.NewService(
 		conversations.NewPostgresRepository(pool), az))

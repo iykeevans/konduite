@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/iykeevans/konduite/backend/internal/auth"
+	"github.com/iykeevans/konduite/backend/internal/authz"
 	"github.com/iykeevans/konduite/backend/internal/platform/errs"
 )
 
@@ -23,16 +24,17 @@ const (
 	maxNameLength    = 100
 )
 
-// Service registers runtimes and exchanges refresh credentials for tokens.
+// Service registers and lists runtimes and exchanges refresh credentials for
+// tokens.
 type Service struct {
-	repo      Repository
-	authorize AuthorizeRegister
-	signer    signer
+	repo   Repository
+	az     Authorizer
+	signer signer
 }
 
 // NewService returns a Service that signs runtime tokens with key.
-func NewService(repo Repository, authorize AuthorizeRegister, key ed25519.PrivateKey) *Service {
-	return &Service{repo: repo, authorize: authorize, signer: newSigner(key)}
+func NewService(repo Repository, az Authorizer, key ed25519.PrivateKey) *Service {
+	return &Service{repo: repo, az: az, signer: newSigner(key)}
 }
 
 // Register creates a runtime owned by p in in.WorkspaceID and returns its
@@ -51,7 +53,7 @@ func (s *Service) Register(ctx context.Context, p auth.Principal, in RegisterInp
 	if len(fields) > 0 {
 		return Registration{}, errs.Invalid("invalid runtime registration", fields)
 	}
-	if err := s.authorize(ctx, p, in.WorkspaceID); err != nil {
+	if err := s.az.Can(ctx, p, authz.ActionRegisterRuntime, authz.Workspace(in.WorkspaceID)); err != nil {
 		return Registration{}, err
 	}
 
@@ -74,6 +76,62 @@ func (s *Service) Register(ctx context.Context, p auth.Principal, in RegisterInp
 		RefreshCredential: encodeCredential(credID, secret),
 		CreatedAt:         rt.CreatedAt,
 	}, nil
+}
+
+// Get returns a runtime. One in a workspace p cannot see gets the same error
+// as one that does not exist.
+func (s *Service) Get(ctx context.Context, p auth.Principal, id uuid.UUID) (Runtime, error) {
+	notFound := errs.NotFound("runtime not found")
+	rt, err := s.repo.Get(ctx, id)
+	if errors.Is(err, ErrNotFound) {
+		return Runtime{}, notFound
+	}
+	if err != nil {
+		return Runtime{}, err
+	}
+	if err := s.az.Can(ctx, p, authz.ActionViewRuntimes, authz.Workspace(rt.WorkspaceID)); err != nil {
+		if e, ok := errs.As(err); ok && e.Kind == errs.KindNotFound {
+			return Runtime{}, notFound
+		}
+		return Runtime{}, err
+	}
+	return rt, nil
+}
+
+// List returns a page of in.WorkspaceID's runtimes, newest first.
+func (s *Service) List(ctx context.Context, p auth.Principal, in ListInput) (Page, error) {
+	if in.WorkspaceID == uuid.Nil {
+		return Page{}, errs.Invalid("invalid runtime query", map[string]string{"workspace_id": "required"})
+	}
+	if err := s.az.Can(ctx, p, authz.ActionViewRuntimes, authz.Workspace(in.WorkspaceID)); err != nil {
+		return Page{}, err
+	}
+	items, err := s.repo.List(ctx, ListFilter{WorkspaceID: in.WorkspaceID, After: in.After, Limit: in.Limit + 1})
+	if err != nil {
+		return Page{}, err
+	}
+	if len(items) <= in.Limit {
+		return Page{Items: items}, nil
+	}
+	items = items[:in.Limit]
+	last := items[len(items)-1]
+	return Page{Items: items, Next: &Position{CreatedAt: last.CreatedAt, ID: last.ID}}, nil
+}
+
+// Self returns the runtime a runtime access token was issued to. The token is
+// the authorization: it can only ever name its own runtime, so there is no
+// workspace role to check. A token whose runtime is gone is unauthenticated.
+func (s *Service) Self(ctx context.Context, accessToken string) (Runtime, error) {
+	denied := errs.Unauthenticated("invalid runtime access token")
+	claims, err := VerifyAccessToken(s.signer.key.Public().(ed25519.PublicKey), accessToken)
+	if err != nil {
+		return Runtime{}, denied
+	}
+	rt, err := s.repo.Get(ctx, claims.RuntimeID)
+	if errors.Is(err, ErrNotFound) {
+		return Runtime{}, denied
+	}
+	return rt, err
 }
 
 // Exchange returns a fresh runtime access token for a refresh credential.
