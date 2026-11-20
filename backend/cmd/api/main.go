@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/iykeevans/konduite/backend/internal/admin"
+	"github.com/iykeevans/konduite/backend/internal/agents"
 	"github.com/iykeevans/konduite/backend/internal/api"
 	"github.com/iykeevans/konduite/backend/internal/auth"
 	"github.com/iykeevans/konduite/backend/internal/authz"
@@ -79,13 +80,15 @@ func run() error {
 		conversations.NewPostgresRepository(pool), az))
 	dlqHandler := deadletters.NewHandler(deadletters.NewService(bus, admin.NewAllowlist(cfg.PlatformAdmins)))
 	memberHandler := members.NewHandler(members.NewService(members.NewPostgresRepository(pool), az))
+	agentHandler := agents.NewHandler(agents.NewRegistry(agents.NewPostgresRegistryRepository(pool), az),
+		runtimeVerifier(tokenKey.Public().(ed25519.PublicKey)))
 
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
-			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, projectHandler.Routes, conversationHandler.Routes, memberHandler.Routes, dlqHandler.Routes},
-			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes},
+			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, projectHandler.Routes, conversationHandler.Routes, memberHandler.Routes, dlqHandler.Routes, agentHandler.Routes},
+			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes, agentHandler.RuntimeRoutes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       120 * time.Second,
@@ -104,4 +107,11 @@ func run() error {
 
 func newAuthorizer(pool *pgxpool.Pool) *authz.Authorizer {
 	return authz.NewWithProjects(authz.StoreMemberships(store.New(pool)))
+}
+
+func runtimeVerifier(pub ed25519.PublicKey) agents.RuntimeVerifier {
+	return func(token string) (agents.Runtime, error) {
+		c, err := runtimes.VerifyAccessToken(pub, token)
+		return agents.Runtime{ID: c.RuntimeID, WorkspaceID: c.WorkspaceID}, err
+	}
 }
