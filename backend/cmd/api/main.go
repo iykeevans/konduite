@@ -28,6 +28,7 @@ import (
 	"github.com/iykeevans/konduite/backend/internal/platform/log"
 	"github.com/iykeevans/konduite/backend/internal/platform/nats"
 	"github.com/iykeevans/konduite/backend/internal/platform/server"
+	"github.com/iykeevans/konduite/backend/internal/projectmembers"
 	"github.com/iykeevans/konduite/backend/internal/projects"
 	"github.com/iykeevans/konduite/backend/internal/runtimes"
 	"github.com/iykeevans/konduite/backend/internal/store"
@@ -79,12 +80,13 @@ func run() error {
 		conversations.NewPostgresRepository(pool), az))
 	dlqHandler := deadletters.NewHandler(deadletters.NewService(bus, admin.NewAllowlist(cfg.PlatformAdmins)))
 	memberHandler := members.NewHandler(members.NewService(members.NewPostgresRepository(pool), az))
+	projectMemberHandler := projectmembers.NewHandler(projectmembers.NewService(projectmembers.NewPostgresRepository(pool), az))
 
 	srv := &http.Server{
 		Handler: api.NewRouter(api.Deps{
 			ReadinessChecks: map[string]api.Check{"postgres": db.Check(pool)},
 			Authenticate:    auth.Middleware(auth.NewVerifier(auth.SupabaseOptions(cfg.SupabaseURL))),
-			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, projectHandler.Routes, conversationHandler.Routes, memberHandler.Routes, dlqHandler.Routes},
+			Routes:          []func(chi.Router){runtimeHandler.Routes, workspaceHandler.Routes, projectHandler.Routes, conversationHandler.Routes, memberHandler.Routes, projectMemberHandler.Routes, dlqHandler.Routes},
 			PublicRoutes:    []func(chi.Router){runtimeHandler.TokenRoutes},
 		}),
 		ReadHeaderTimeout: 5 * time.Second,
