@@ -92,6 +92,91 @@ func (s *Service) canView(ctx context.Context, p auth.Principal, c Conversation)
 	return s.az.Can(ctx, p, authz.ActionViewConversations, authz.Workspace(c.WorkspaceID))
 }
 
+// canContribute checks that p may change c: the project.contribute action
+// for a conversation in a project, and starting a conversation in its
+// workspace (every member) for a workspace-wide one.
+func (s *Service) canContribute(ctx context.Context, p auth.Principal, c Conversation) error {
+	if c.ProjectID != nil {
+		return s.az.Can(ctx, p, authz.ActionContribute, authz.Resource{WorkspaceID: c.WorkspaceID, ProjectID: *c.ProjectID})
+	}
+	return s.az.Can(ctx, p, authz.ActionCreateConversation, authz.Workspace(c.WorkspaceID))
+}
+
+// AddParticipant adds a user, agent or runtime to the conversation. It
+// returns created false, and the stored participant, when it was already
+// there. A user must be able to read the conversation; an agent or runtime
+// must belong to its workspace.
+func (s *Service) AddParticipant(ctx context.Context, p auth.Principal, conversationID uuid.UUID, in ParticipantInput) (Participant, bool, error) {
+	if err := validateParticipant(in.Kind, in.ID); err != nil {
+		return Participant{}, false, err
+	}
+	c, err := s.changeable(ctx, p, conversationID)
+	if err != nil {
+		return Participant{}, false, err
+	}
+	notInWorkspace := errs.Invalid("invalid participant", map[string]string{"id": "not found in this conversation's workspace"})
+	if in.Kind == KindUser {
+		err := s.canView(ctx, auth.Principal{Kind: auth.KindUser, ID: in.ID}, c)
+		if e, ok := errs.As(err); ok && (e.Kind == errs.KindNotFound || e.Kind == errs.KindForbidden) {
+			return Participant{}, false, errs.Invalid("invalid participant",
+				map[string]string{"id": "is not a user who can read this conversation"})
+		}
+		if err != nil {
+			return Participant{}, false, err
+		}
+	}
+	added, created, err := s.repo.AddParticipant(ctx, c.ID, c.WorkspaceID, in.Kind, in.ID)
+	if errors.Is(err, ErrParticipantNotInWorkspace) {
+		return Participant{}, false, notInWorkspace
+	}
+	if errors.Is(err, ErrNotFound) {
+		return Participant{}, false, errs.NotFound("conversation not found")
+	}
+	return added, created, err
+}
+
+// RemoveParticipant removes a participant from the conversation. Removing
+// one that is not there succeeds.
+func (s *Service) RemoveParticipant(ctx context.Context, p auth.Principal, conversationID uuid.UUID, kind ParticipantKind, id uuid.UUID) error {
+	if err := validateParticipant(kind, id); err != nil {
+		return err
+	}
+	c, err := s.changeable(ctx, p, conversationID)
+	if err != nil {
+		return err
+	}
+	return s.repo.RemoveParticipant(ctx, c.ID, kind, id)
+}
+
+// changeable returns the conversation if p may change it: the same 404 as Get
+// when p cannot read it, 403 when p can read but not contribute.
+func (s *Service) changeable(ctx context.Context, p auth.Principal, id uuid.UUID) (Conversation, error) {
+	c, err := s.Get(ctx, p, id)
+	if err != nil {
+		return Conversation{}, err
+	}
+	if err := s.canContribute(ctx, p, c); err != nil {
+		return Conversation{}, err
+	}
+	return c, nil
+}
+
+func validateParticipant(kind ParticipantKind, id uuid.UUID) error {
+	fields := map[string]string{}
+	switch kind {
+	case KindUser, KindAgent, KindRuntime:
+	default:
+		fields["type"] = "must be user, agent or runtime"
+	}
+	if id == uuid.Nil {
+		fields["id"] = "required"
+	}
+	if len(fields) > 0 {
+		return errs.Invalid("invalid participant", fields)
+	}
+	return nil
+}
+
 func isNotFound(err error) bool {
 	e, ok := errs.As(err)
 	return ok && e.Kind == errs.KindNotFound

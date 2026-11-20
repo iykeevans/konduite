@@ -215,3 +215,66 @@ func TestPostgresRepositoryListsProjectConversationsOnlyToWhoeverAuthzLetsViewTh
 		})
 	}
 }
+
+func seedRuntimeAndAgent(t *testing.T, pool *pgxpool.Pool, workspace uuid.UUID) (runtime, agent uuid.UUID) {
+	t.Helper()
+	ctx := t.Context()
+	if err := pool.QueryRow(ctx, `INSERT INTO agent_runtime_instances (workspace_id, owner_id, name) VALUES ($1, $2, 'laptop') RETURNING id`,
+		workspace, uuid.New()).Scan(&runtime); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `INSERT INTO agents (workspace_id, runtime_id, provider, name) VALUES ($1, $2, 'claude_code', 'claude') RETURNING id`,
+		workspace, runtime).Scan(&agent); err != nil {
+		t.Fatal(err)
+	}
+	return runtime, agent
+}
+
+func TestPostgresRepositoryAddsAndRemovesParticipants(t *testing.T) {
+	pool := dbtest.New(t)
+	ctx := t.Context()
+	ws := seedWorkspace(t, pool, "acme")
+	runtime, agent := seedRuntimeAndAgent(t, pool, ws)
+	foreignRuntime, foreignAgent := seedRuntimeAndAgent(t, pool, seedWorkspace(t, pool, "other"))
+	repo := conversations.NewPostgresRepository(pool)
+	c, err := repo.Create(ctx, conversations.NewConversation{WorkspaceID: ws, CreatedBy: uuid.New()})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, created, err := repo.AddParticipant(ctx, c.ID, ws, conversations.KindAgent, agent)
+	if err != nil || !created || first.ID != agent || first.Kind != conversations.KindAgent {
+		t.Fatalf("add agent = %+v, created %v, err %v", first, created, err)
+	}
+	again, created, err := repo.AddParticipant(ctx, c.ID, ws, conversations.KindAgent, agent)
+	if err != nil || created || !again.JoinedAt.Equal(first.JoinedAt) {
+		t.Errorf("re-add agent = %+v, created %v, err %v; want the stored row", again, created, err)
+	}
+	if _, created, err := repo.AddParticipant(ctx, c.ID, ws, conversations.KindRuntime, runtime); err != nil || !created {
+		t.Errorf("add runtime: created %v, err %v", created, err)
+	}
+	for _, tc := range []struct {
+		kind conversations.ParticipantKind
+		id   uuid.UUID
+	}{
+		{conversations.KindAgent, foreignAgent}, {conversations.KindRuntime, foreignRuntime},
+		{conversations.KindAgent, uuid.New()}, {conversations.KindRuntime, agent},
+	} {
+		if _, _, err := repo.AddParticipant(ctx, c.ID, ws, tc.kind, tc.id); !errors.Is(err, conversations.ErrParticipantNotInWorkspace) {
+			t.Errorf("add %s %v: err = %v, want ErrParticipantNotInWorkspace", tc.kind, tc.id, err)
+		}
+	}
+
+	for range 2 {
+		if err := repo.RemoveParticipant(ctx, c.ID, conversations.KindAgent, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := repo.Get(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Participants) != 2 || got.Participants[1].Kind != conversations.KindRuntime {
+		t.Errorf("participants = %+v, want the creator and the runtime", got.Participants)
+	}
+}

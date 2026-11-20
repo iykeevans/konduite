@@ -95,6 +95,60 @@ func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Conversat
 	return out, nil
 }
 
+func (r postgresRepository) AddParticipant(ctx context.Context, conversationID, workspaceID uuid.UUID, kind ParticipantKind, id uuid.UUID) (Participant, bool, error) {
+	var (
+		out     Participant
+		created bool
+	)
+	err := db.WithTx(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		q := store.New(tx)
+		var (
+			inWorkspace = true
+			err         error
+		)
+		switch kind {
+		case KindAgent:
+			inWorkspace, err = q.AgentInWorkspace(ctx, store.AgentInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
+		case KindRuntime:
+			inWorkspace, err = q.RuntimeInWorkspace(ctx, store.RuntimeInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
+		}
+		if err != nil {
+			return err
+		}
+		if !inWorkspace {
+			return ErrParticipantNotInWorkspace
+		}
+		row, err := q.AddConversationParticipant(ctx, store.AddConversationParticipantParams{
+			ConversationID: conversationID, ParticipantType: string(kind), ParticipantID: id,
+		})
+		if err == nil {
+			out, created = fromParticipantRow(row), true
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		row, err = q.GetConversationParticipant(ctx, store.GetConversationParticipantParams{
+			ConversationID: conversationID, ParticipantType: string(kind), ParticipantID: id,
+		})
+		if err != nil {
+			return err
+		}
+		out = fromParticipantRow(row)
+		return nil
+	})
+	if err != nil {
+		return Participant{}, false, err
+	}
+	return out, created, nil
+}
+
+func (r postgresRepository) RemoveParticipant(ctx context.Context, conversationID uuid.UUID, kind ParticipantKind, id uuid.UUID) error {
+	return store.New(r.pool).DeleteConversationParticipant(ctx, store.DeleteConversationParticipantParams{
+		ConversationID: conversationID, ParticipantType: string(kind), ParticipantID: id,
+	})
+}
+
 func fromRow(r store.Conversation) Conversation {
 	return Conversation{
 		ID: r.ID, WorkspaceID: r.WorkspaceID, ProjectID: r.ProjectID, Title: r.Title, CreatedBy: r.CreatedBy,

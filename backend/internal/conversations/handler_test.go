@@ -225,3 +225,72 @@ func TestListOverHTTPRejects(t *testing.T) {
 		})
 	}
 }
+
+func TestParticipantsOverHTTP(t *testing.T) {
+	f := newFixture(t)
+	c := create(t, f, `{"workspace_id":"`+f.workspace.String()+`"}`)
+	agent := f.agentIn(f.workspace)
+	h := router(f, &f.user)
+	path := "/api/v1/conversations/" + c.ID + "/participants"
+	body := `{"type":"agent","id":"` + agent.String() + `"}`
+
+	rec, resp := do(t, h, http.MethodPost, path, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("first add status = %d, want 201 (%s)", rec.Code, rec.Body)
+	}
+	var p struct {
+		Type     string `json:"type"`
+		ID       string `json:"id"`
+		JoinedAt string `json:"joined_at"`
+	}
+	_ = json.Unmarshal(resp.Data, &p)
+	if p.Type != "agent" || p.ID != agent.String() || p.JoinedAt == "" {
+		t.Errorf("participant = %+v, want the agent", p)
+	}
+	if rec, _ := do(t, h, http.MethodPost, path, body); rec.Code != http.StatusOK {
+		t.Errorf("repeat add status = %d, want 200 (%s)", rec.Code, rec.Body)
+	}
+
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequestWithContext(t.Context(), http.MethodDelete, path+"/agent/"+agent.String(), nil))
+	if rec.Code != http.StatusNoContent || rec.Body.Len() != 0 {
+		t.Errorf("remove status = %d body %q, want 204 and no body", rec.Code, rec.Body)
+	}
+}
+
+func TestParticipantsOverHTTPRejects(t *testing.T) {
+	f := newFixture(t)
+	c := create(t, f, `{"workspace_id":"`+f.workspace.String()+`"}`)
+	agent := f.agentIn(f.workspace).String()
+	base := "/api/v1/conversations/" + c.ID + "/participants"
+	tests := []struct {
+		name   string
+		caller *auth.Principal
+		method string
+		path   string
+		body   string
+		status int
+		field  string
+	}{
+		{"anonymous add", nil, http.MethodPost, base, `{"type":"agent","id":"` + agent + `"}`, http.StatusUnauthorized, ""},
+		{"non-member add", &f.stranger, http.MethodPost, base, `{"type":"agent","id":"` + agent + `"}`, http.StatusNotFound, ""},
+		{"malformed JSON", &f.user, http.MethodPost, base, `{"type":`, http.StatusUnprocessableEntity, ""},
+		{"bad participant id", &f.user, http.MethodPost, base, `{"type":"agent","id":"bob"}`, http.StatusUnprocessableEntity, "id"},
+		{"bad type", &f.user, http.MethodPost, base, `{"type":"bot","id":"` + agent + `"}`, http.StatusUnprocessableEntity, "type"},
+		{"bad conversation id", &f.user, http.MethodPost, "/api/v1/conversations/abc/participants", `{"type":"agent","id":"` + agent + `"}`, http.StatusNotFound, ""},
+		{"remove with bad participant id", &f.user, http.MethodDelete, base + "/agent/bob", "", http.StatusNotFound, ""},
+		{"remove with bad type", &f.user, http.MethodDelete, base + "/bot/" + agent, "", http.StatusUnprocessableEntity, "type"},
+		{"non-member remove", &f.stranger, http.MethodDelete, base + "/agent/" + agent, "", http.StatusNotFound, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec, resp := do(t, router(f, tt.caller), tt.method, tt.path, tt.body)
+			if rec.Code != tt.status {
+				t.Errorf("status = %d, want %d (%s)", rec.Code, tt.status, rec.Body)
+			}
+			if tt.field != "" && resp.Error.Details.Fields[tt.field] == "" {
+				t.Errorf("fields = %v, want a problem with %s", resp.Error.Details.Fields, tt.field)
+			}
+		})
+	}
+}

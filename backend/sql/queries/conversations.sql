@@ -38,3 +38,23 @@ WHERE c.workspace_id = @workspace_id
        OR (c.created_at, c.id) < (sqlc.narg(after_created_at)::timestamptz, sqlc.narg(after_id)::uuid))
 ORDER BY c.created_at DESC, c.id DESC
 LIMIT @row_limit;
+
+-- name: AgentInWorkspace :one
+SELECT EXISTS (SELECT 1 FROM agents WHERE id = $1 AND workspace_id = $2);
+
+-- name: RuntimeInWorkspace :one
+SELECT EXISTS (SELECT 1 FROM agent_runtime_instances WHERE id = $1 AND workspace_id = $2);
+
+-- name: AddConversationParticipant :one
+INSERT INTO conversation_participants (conversation_id, participant_type, participant_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (conversation_id, participant_type, participant_id) DO NOTHING
+RETURNING *;
+
+-- name: GetConversationParticipant :one
+SELECT * FROM conversation_participants
+WHERE conversation_id = $1 AND participant_type = $2 AND participant_id = $3;
+
+-- name: DeleteConversationParticipant :exec
+DELETE FROM conversation_participants
+WHERE conversation_id = $1 AND participant_type = $2 AND participant_id = $3;

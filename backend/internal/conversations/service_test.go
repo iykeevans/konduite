@@ -22,7 +22,44 @@ type fakeRepo struct {
 	rows     []conversations.Conversation
 	projects map[uuid.UUID]uuid.UUID
 	dir      *fakeDirectory
+	members  map[conversations.ParticipantKind]map[uuid.UUID]uuid.UUID
 	clock    time.Time
+}
+
+func (f *fakeRepo) AddParticipant(_ context.Context, conversationID, workspaceID uuid.UUID, kind conversations.ParticipantKind, id uuid.UUID) (conversations.Participant, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if kind != conversations.KindUser && f.members[kind][id] != workspaceID {
+		return conversations.Participant{}, false, conversations.ErrParticipantNotInWorkspace
+	}
+	for i, c := range f.rows {
+		if c.ID != conversationID {
+			continue
+		}
+		for _, p := range c.Participants {
+			if p.Kind == kind && p.ID == id {
+				return p, false, nil
+			}
+		}
+		f.clock = f.clock.Add(time.Second)
+		p := conversations.Participant{Kind: kind, ID: id, JoinedAt: f.clock}
+		f.rows[i].Participants = append(slices.Clone(c.Participants), p)
+		return p, true, nil
+	}
+	return conversations.Participant{}, false, conversations.ErrNotFound
+}
+
+func (f *fakeRepo) RemoveParticipant(_ context.Context, conversationID uuid.UUID, kind conversations.ParticipantKind, id uuid.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i, c := range f.rows {
+		if c.ID == conversationID {
+			f.rows[i].Participants = slices.DeleteFunc(slices.Clone(c.Participants), func(p conversations.Participant) bool {
+				return p.Kind == kind && p.ID == id
+			})
+		}
+	}
+	return nil
 }
 
 func (f *fakeRepo) Create(_ context.Context, n conversations.NewConversation) (conversations.Conversation, error) {
@@ -145,7 +182,10 @@ func newFixture(t *testing.T) fixture {
 			{f.project, f.viewer.ID}: authz.ProjectRoleViewer,
 		},
 	}
-	f.repo = &fakeRepo{projects: dir.projects, dir: dir, clock: time.Unix(1_800_000_000, 0)}
+	f.repo = &fakeRepo{projects: dir.projects, dir: dir, clock: time.Unix(1_800_000_000, 0),
+		members: map[conversations.ParticipantKind]map[uuid.UUID]uuid.UUID{
+			conversations.KindAgent: {}, conversations.KindRuntime: {},
+		}}
 	f.svc = conversations.NewService(f.repo, authz.NewWithProjects(dir))
 	return f
 }
@@ -444,6 +484,151 @@ func (r failingRepo) Create(context.Context, conversations.NewConversation) (con
 func (r failingRepo) Get(context.Context, uuid.UUID) (conversations.Conversation, error) {
 	return conversations.Conversation{}, r.err
 }
+func (r failingRepo) AddParticipant(context.Context, uuid.UUID, uuid.UUID, conversations.ParticipantKind, uuid.UUID) (conversations.Participant, bool, error) {
+	return conversations.Participant{}, false, r.err
+}
+func (r failingRepo) RemoveParticipant(context.Context, uuid.UUID, conversations.ParticipantKind, uuid.UUID) error {
+	return r.err
+}
 func (r failingRepo) List(context.Context, conversations.ListFilter) ([]conversations.Conversation, error) {
 	return nil, r.err
+}
+
+func (f fixture) agentIn(ws uuid.UUID) uuid.UUID {
+	id := uuid.New()
+	f.repo.members[conversations.KindAgent][id] = ws
+	return id
+}
+
+func (f fixture) runtimeIn(ws uuid.UUID) uuid.UUID {
+	id := uuid.New()
+	f.repo.members[conversations.KindRuntime][id] = ws
+	return id
+}
+
+func participantIDs(c conversations.Conversation) []string {
+	var out []string
+	for _, p := range c.Participants {
+		out = append(out, string(p.Kind)+":"+p.ID.String())
+	}
+	return out
+}
+
+func TestAddParticipantIsIdempotent(t *testing.T) {
+	f := newFixture(t)
+	c := f.create(t, f.user, nil)
+	agent, runtime := f.agentIn(f.workspace), f.runtimeIn(f.workspace)
+
+	first, created, err := f.svc.AddParticipant(t.Context(), f.teammate, c.ID, conversations.ParticipantInput{Kind: conversations.KindAgent, ID: agent})
+	if err != nil || !created || first.Kind != conversations.KindAgent || first.ID != agent || first.JoinedAt.IsZero() {
+		t.Fatalf("first add = %+v, created %v, err %v; want a new agent participant", first, created, err)
+	}
+	again, created, err := f.svc.AddParticipant(t.Context(), f.user, c.ID, conversations.ParticipantInput{Kind: conversations.KindAgent, ID: agent})
+	if err != nil || created || again != first {
+		t.Errorf("second add = %+v, created %v, err %v; want the existing participant unchanged", again, created, err)
+	}
+	if _, _, err := f.svc.AddParticipant(t.Context(), f.user, c.ID, conversations.ParticipantInput{Kind: conversations.KindRuntime, ID: runtime}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := f.svc.AddParticipant(t.Context(), f.user, c.ID, conversations.ParticipantInput{Kind: conversations.KindUser, ID: f.viewer.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := f.svc.Get(t.Context(), f.user, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"user:" + f.user.ID.String(), "agent:" + agent.String(), "runtime:" + runtime.String(), "user:" + f.viewer.ID.String()}
+	if !slices.Equal(participantIDs(got), want) {
+		t.Errorf("participants = %v, want %v", participantIDs(got), want)
+	}
+}
+
+func TestAddParticipantRejectsParticipantsOutsideTheConversation(t *testing.T) {
+	f := newFixture(t)
+	open := f.create(t, f.user, nil)
+	inProject := f.create(t, f.user, &f.project)
+	tests := []struct {
+		name  string
+		conv  uuid.UUID
+		in    conversations.ParticipantInput
+		field string
+	}{
+		{"unknown type", open.ID, conversations.ParticipantInput{Kind: "bot", ID: uuid.New()}, "type"},
+		{"no id", open.ID, conversations.ParticipantInput{Kind: conversations.KindAgent}, "id"},
+		{"agent in another workspace", open.ID, conversations.ParticipantInput{Kind: conversations.KindAgent, ID: f.agentIn(f.other)}, "id"},
+		{"unknown agent", open.ID, conversations.ParticipantInput{Kind: conversations.KindAgent, ID: uuid.New()}, "id"},
+		{"runtime in another workspace", open.ID, conversations.ParticipantInput{Kind: conversations.KindRuntime, ID: f.runtimeIn(f.other)}, "id"},
+		{"user outside the workspace", open.ID, conversations.ParticipantInput{Kind: conversations.KindUser, ID: f.stranger.ID}, "id"},
+		{"user who cannot view the project", inProject.ID, conversations.ParticipantInput{Kind: conversations.KindUser, ID: f.teammate.ID}, "id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, err := f.svc.AddParticipant(t.Context(), f.user, tt.conv, tt.in)
+			assertKind(t, err, errs.KindInvalid)
+			if e, _ := errs.As(err); e.Fields[tt.field] == "" {
+				t.Errorf("fields = %v, want a problem with %s", e.Fields, tt.field)
+			}
+		})
+	}
+}
+
+func TestChangingParticipantsNeedsToContributeToTheConversation(t *testing.T) {
+	f := newFixture(t)
+	open := f.create(t, f.user, nil)
+	inProject := f.create(t, f.user, &f.project)
+	agent := f.agentIn(f.workspace)
+	add := conversations.ParticipantInput{Kind: conversations.KindAgent, ID: agent}
+
+	tests := []struct {
+		name   string
+		caller auth.Principal
+		conv   uuid.UUID
+		want   errs.Kind
+	}{
+		{"any member, workspace conversation", f.teammate, open.ID, ""},
+		{"project contributor", f.user, inProject.ID, ""},
+		{"workspace admin", f.admin, inProject.ID, ""},
+		{"project viewer", f.viewer, inProject.ID, errs.KindForbidden},
+		{"member outside the project", f.teammate, inProject.ID, errs.KindNotFound},
+		{"non-member", f.stranger, open.ID, errs.KindNotFound},
+		{"unknown conversation", f.user, uuid.New(), errs.KindNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, _, addErr := f.svc.AddParticipant(t.Context(), tt.caller, tt.conv, add)
+			removeErr := f.svc.RemoveParticipant(t.Context(), tt.caller, tt.conv, conversations.KindAgent, agent)
+			if tt.want == "" {
+				if addErr != nil || removeErr != nil {
+					t.Fatalf("add: %v, remove: %v; want both allowed", addErr, removeErr)
+				}
+				return
+			}
+			assertKind(t, addErr, tt.want)
+			assertKind(t, removeErr, tt.want)
+		})
+	}
+}
+
+func TestRemoveParticipantIsIdempotent(t *testing.T) {
+	f := newFixture(t)
+	c := f.create(t, f.user, nil)
+	agent := f.agentIn(f.workspace)
+	if _, _, err := f.svc.AddParticipant(t.Context(), f.user, c.ID, conversations.ParticipantInput{Kind: conversations.KindAgent, ID: agent}); err != nil {
+		t.Fatal(err)
+	}
+
+	for range 2 {
+		if err := f.svc.RemoveParticipant(t.Context(), f.user, c.ID, conversations.KindAgent, agent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := f.svc.Get(t.Context(), f.user, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"user:" + f.user.ID.String()}; !slices.Equal(participantIDs(got), want) {
+		t.Errorf("participants = %v, want %v", participantIDs(got), want)
+	}
+	assertKind(t, f.svc.RemoveParticipant(t.Context(), f.user, c.ID, "bot", agent), errs.KindInvalid)
 }

@@ -12,6 +12,64 @@ import (
 	"github.com/google/uuid"
 )
 
+const addConversationParticipant = `-- name: AddConversationParticipant :one
+INSERT INTO conversation_participants (conversation_id, participant_type, participant_id)
+VALUES ($1, $2, $3)
+ON CONFLICT (conversation_id, participant_type, participant_id) DO NOTHING
+RETURNING id, conversation_id, participant_type, participant_id, joined_at
+`
+
+type AddConversationParticipantParams struct {
+	ConversationID  uuid.UUID
+	ParticipantType string
+	ParticipantID   uuid.UUID
+}
+
+func (q *Queries) AddConversationParticipant(ctx context.Context, arg AddConversationParticipantParams) (ConversationParticipant, error) {
+	row := q.db.QueryRow(ctx, addConversationParticipant, arg.ConversationID, arg.ParticipantType, arg.ParticipantID)
+	var i ConversationParticipant
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.ParticipantType,
+		&i.ParticipantID,
+		&i.JoinedAt,
+	)
+	return i, err
+}
+
+const agentInWorkspace = `-- name: AgentInWorkspace :one
+SELECT EXISTS (SELECT 1 FROM agents WHERE id = $1 AND workspace_id = $2)
+`
+
+type AgentInWorkspaceParams struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+}
+
+func (q *Queries) AgentInWorkspace(ctx context.Context, arg AgentInWorkspaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, agentInWorkspace, arg.ID, arg.WorkspaceID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const deleteConversationParticipant = `-- name: DeleteConversationParticipant :exec
+DELETE FROM conversation_participants
+WHERE conversation_id = $1 AND participant_type = $2 AND participant_id = $3
+`
+
+type DeleteConversationParticipantParams struct {
+	ConversationID  uuid.UUID
+	ParticipantType string
+	ParticipantID   uuid.UUID
+}
+
+func (q *Queries) DeleteConversationParticipant(ctx context.Context, arg DeleteConversationParticipantParams) error {
+	_, err := q.db.Exec(ctx, deleteConversationParticipant, arg.ConversationID, arg.ParticipantType, arg.ParticipantID)
+	return err
+}
+
 const getConversation = `-- name: GetConversation :one
 SELECT id, workspace_id, project_id, title, created_by, last_seq, created_at, updated_at FROM conversations WHERE id = $1
 `
@@ -28,6 +86,30 @@ func (q *Queries) GetConversation(ctx context.Context, id uuid.UUID) (Conversati
 		&i.LastSeq,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getConversationParticipant = `-- name: GetConversationParticipant :one
+SELECT id, conversation_id, participant_type, participant_id, joined_at FROM conversation_participants
+WHERE conversation_id = $1 AND participant_type = $2 AND participant_id = $3
+`
+
+type GetConversationParticipantParams struct {
+	ConversationID  uuid.UUID
+	ParticipantType string
+	ParticipantID   uuid.UUID
+}
+
+func (q *Queries) GetConversationParticipant(ctx context.Context, arg GetConversationParticipantParams) (ConversationParticipant, error) {
+	row := q.db.QueryRow(ctx, getConversationParticipant, arg.ConversationID, arg.ParticipantType, arg.ParticipantID)
+	var i ConversationParticipant
+	err := row.Scan(
+		&i.ID,
+		&i.ConversationID,
+		&i.ParticipantType,
+		&i.ParticipantID,
+		&i.JoinedAt,
 	)
 	return i, err
 }
@@ -203,4 +285,20 @@ func (q *Queries) LockProjectInWorkspace(ctx context.Context, arg LockProjectInW
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const runtimeInWorkspace = `-- name: RuntimeInWorkspace :one
+SELECT EXISTS (SELECT 1 FROM agent_runtime_instances WHERE id = $1 AND workspace_id = $2)
+`
+
+type RuntimeInWorkspaceParams struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+}
+
+func (q *Queries) RuntimeInWorkspace(ctx context.Context, arg RuntimeInWorkspaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, runtimeInWorkspace, arg.ID, arg.WorkspaceID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

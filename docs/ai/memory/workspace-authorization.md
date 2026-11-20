@@ -37,5 +37,6 @@ Decided in SEC-001 (#24) and SEC-002 (#25), 2026-11-19. Code: `backend/internal/
 - A conversation with a `project_id` follows the project, not the workspace: reading needs `project.view`, creating needs `project.contribute` (viewers are read-only, as for messages). Workspace-wide conversations stay open to every member.
 - Get of a hidden one returns the same `conversation not found` 404 as a missing one, including when authz said 403.
 - The list filters in SQL (`ListConversations`: owner/admin or any `project_members` row), not by calling `Can` per row. That duplicates the `project.view` rule, so `TestPostgresRepositoryListsProjectConversationsOnlyToWhoeverAuthzLetsViewTheProject` cross-checks the SQL against `authz.Can` for every role combination; update both together.
+- **Participants** (`POST /conversations/{id}/participants`, `DELETE .../{type}/{participant_id}`) need the right to contribute to the conversation: any member for a workspace-wide one (`workspace.conversations.create`), `project.contribute` for a project one. A user participant must pass `Can` for reading the conversation; agents and runtimes must be in its workspace. Both calls are idempotent (re-add is 200, removing a non-participant is 204).
 
 Related: [[api-envelope-and-error-mapping]], [[user-ids-have-no-auth-fk]]
