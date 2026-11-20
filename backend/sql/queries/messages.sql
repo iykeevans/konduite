@@ -20,3 +20,9 @@ WHERE conversation_id = $1 AND sender_id = $2 AND idempotency_key = $3;
 
 -- name: GetMessage :one
 SELECT * FROM messages WHERE id = $1;
+
+-- name: ListMessagesAfter :many
+SELECT * FROM messages
+WHERE conversation_id = @conversation_id AND sequence_number > @after_seq
+ORDER BY sequence_number
+LIMIT @row_limit;
