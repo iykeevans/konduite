@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/iykeevans/konduite/backend/internal/deliveries"
 	"github.com/iykeevans/konduite/backend/internal/outbox"
 	"github.com/iykeevans/konduite/backend/internal/platform/config"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
@@ -52,6 +53,12 @@ func run() error {
 	reg := worker.NewRegistry()
 	relay := outbox.NewRelay(pool, bus, outbox.Config{Logger: slog.Default()})
 	if err := reg.Add("outbox-relay", relay.Run); err != nil {
+		return err
+	}
+	router := deliveries.NewRouter(pool, slog.Default())
+	if err := reg.Add("message-router", func(ctx context.Context) error {
+		return bus.Consume(ctx, deliveries.ConsumerSpec(slog.Default()), router.Handle)
+	}); err != nil {
 		return err
 	}
 

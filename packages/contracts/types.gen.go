@@ -137,6 +137,28 @@ type RuntimeConnected struct {
 	RuntimeID string `json:"runtime_id"`
 }
 
+// A message has pending deliveries for a runtime. Published on
+// agenthub.rt.<runtime_id>.deliver, once per message and runtime, to wake that
+// runtime's connection. Carries ids only: the connection loads the deliveries and
+// the message before pushing them.
+type RuntimeDeliver struct {
+	// ConversationID corresponds to the JSON schema field "conversation_id".
+	ConversationID string `json:"conversation_id"`
+
+	// The message_deliveries rows for this runtime: one per agent of the runtime in
+	// the conversation, plus one if the runtime takes part itself.
+	DeliveryIds []string `json:"delivery_ids"`
+
+	// MessageID corresponds to the JSON schema field "message_id".
+	MessageID string `json:"message_id"`
+
+	// RuntimeID corresponds to the JSON schema field "runtime_id".
+	RuntimeID string `json:"runtime_id"`
+
+	// The message's position in its conversation.
+	SequenceNumber int `json:"sequence_number"`
+}
+
 // A runtime went offline: its socket closed, its heartbeat timed out, or its
 // credential was revoked.
 type RuntimeDisconnected struct {
