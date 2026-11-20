@@ -95,6 +95,7 @@ func rsaKey(t *testing.T, kid string) jwk.Key {
 
 type claims struct {
 	sub, iss, aud string
+	email         string
 	exp, nbf      time.Time
 }
 
@@ -107,6 +108,9 @@ func sign(t *testing.T, key jwk.Key, alg jwa.SignatureAlgorithm, c claims) strin
 	b := jwt.NewBuilder().Subject(c.sub).Issuer(c.iss).Audience([]string{c.aud}).Expiration(c.exp).IssuedAt(time.Now())
 	if !c.nbf.IsZero() {
 		b = b.NotBefore(c.nbf)
+	}
+	if c.email != "" {
+		b = b.Claim("email", c.email)
 	}
 	tok, err := b.Build()
 	if err != nil {
@@ -146,6 +150,26 @@ func TestVerifyAcceptsAValidSupabaseToken(t *testing.T) {
 				t.Errorf("principal = %+v, want user %s", p, user)
 			}
 		})
+	}
+}
+
+func TestVerifyCarriesTheTokensEmailLowercased(t *testing.T) {
+	key := ecKey(t, "ec-1")
+	v := newVerifier(t, newJWKSServer(t, key), time.Minute)
+
+	c := validClaims(uuid.New())
+	c.email = " Ada@Example.COM "
+	p, err := v.Verify(t.Context(), sign(t, key, jwa.ES256(), c))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Email != "ada@example.com" {
+		t.Errorf("email = %q, want ada@example.com", p.Email)
+	}
+
+	p, err = v.Verify(t.Context(), sign(t, key, jwa.ES256(), validClaims(uuid.New())))
+	if err != nil || p.Email != "" {
+		t.Errorf("token without email: principal %+v, %v; want no email", p, err)
 	}
 }
 

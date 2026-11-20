@@ -29,6 +29,9 @@ async function WorkspaceDetails({ id }: { id: string }) {
       <h1 className="text-2xl font-semibold">{workspace.name}</h1>
       <p className="font-mono text-sm text-zinc-500">{workspace.slug}</p>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">Your role: {workspace.role.replace("_", " ")}</p>
+      <Link href={`/workspaces/${workspace.id}/members`} className="text-sm underline">
+        Members
+      </Link>
       <Projects workspaceId={workspace.id} role={workspace.role} />
     </section>
   );

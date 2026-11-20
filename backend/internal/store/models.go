@@ -92,6 +92,7 @@ type Invitation struct {
 	ExpiresAt   time.Time
 	AcceptedAt  *time.Time
 	CreatedAt   time.Time
+	AcceptedBy  *uuid.UUID
 }
 
 type Message struct {
@@ -160,4 +161,5 @@ type WorkspaceMember struct {
 	UserID      uuid.UUID
 	Role        string
 	JoinedAt    time.Time
+	Email       *string
 }

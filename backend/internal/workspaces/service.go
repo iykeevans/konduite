@@ -49,7 +49,7 @@ func (s *Service) Create(ctx context.Context, p auth.Principal, in CreateInput) 
 	if len(fields) > 0 {
 		return Workspace{}, errs.Invalid("invalid workspace", fields)
 	}
-	ws, err := s.repo.Create(ctx, NewWorkspace{Name: name, Slug: slug, OwnerID: p.ID})
+	ws, err := s.repo.Create(ctx, NewWorkspace{Name: name, Slug: slug, OwnerID: p.ID, OwnerEmail: p.Email})
 	return ws, domainError(err)
 }
 

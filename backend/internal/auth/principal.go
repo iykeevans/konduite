@@ -17,6 +17,11 @@ const KindUser Kind = "user"
 type Principal struct {
 	Kind Kind
 	ID   uuid.UUID
+	// Email is the lowercased email claim of a user's Supabase token, or
+	// empty when it has none. It proves the user controls the address only
+	// when the Supabase project requires email confirmation (local dev
+	// doesn't).
+	Email string
 }
 
 type principalKey struct{}

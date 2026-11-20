@@ -11,3 +11,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [Runtime CLI authentication](runtime-cli-auth.md) — agenthub login/logout: loopback PKCE, only the runtime credential in the keychain, logout revokes then clears even on failure.
 - [Message ordering and idempotency](message-ordering-and-idempotency.md) — seq from conversations.last_seq in the write tx; AppendTx returns the original on retry without using a number; message.created has ids, not content.
 - [Parallel agent worktrees](parallel-agent-worktrees.md) — fresh worktree needs `next typegen` before the web type-check (LayoutProps); rerun an integration package alone when testcontainers miss their deadline.
+- [Workspace membership](workspace-membership.md) — invitation tokens hashed and shown once, accept link in a URL fragment POSTed in a body, email-bound accept, last-owner guard under row locks.

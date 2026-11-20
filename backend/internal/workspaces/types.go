@@ -53,11 +53,13 @@ type ListPage struct {
 	Next  string
 }
 
-// NewWorkspace is a workspace to create, owned by OwnerID.
+// NewWorkspace is a workspace to create, owned by OwnerID. OwnerEmail may be
+// empty.
 type NewWorkspace struct {
-	Name    string
-	Slug    string
-	OwnerID uuid.UUID
+	Name       string
+	Slug       string
+	OwnerID    uuid.UUID
+	OwnerEmail string
 }
 
 // Repository errors.
