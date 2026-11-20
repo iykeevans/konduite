@@ -105,18 +105,24 @@ func (q *Queries) InsertWorkspace(ctx context.Context, arg InsertWorkspaceParams
 }
 
 const insertWorkspaceMember = `-- name: InsertWorkspaceMember :exec
-INSERT INTO workspace_members (workspace_id, user_id, role)
-VALUES ($1, $2, $3)
+INSERT INTO workspace_members (workspace_id, user_id, role, email)
+VALUES ($1, $2, $3, $4)
 `
 
 type InsertWorkspaceMemberParams struct {
 	WorkspaceID uuid.UUID
 	UserID      uuid.UUID
 	Role        string
+	Email       *string
 }
 
 func (q *Queries) InsertWorkspaceMember(ctx context.Context, arg InsertWorkspaceMemberParams) error {
-	_, err := q.db.Exec(ctx, insertWorkspaceMember, arg.WorkspaceID, arg.UserID, arg.Role)
+	_, err := q.db.Exec(ctx, insertWorkspaceMember,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.Role,
+		arg.Email,
+	)
 	return err
 }
 

@@ -238,6 +238,259 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/workspaces/{workspaceId}/members:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    get:
+      summary: List a workspace's members, ordered by join time.
+      description: Every member may list members.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Member" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          $ref: "#/components/responses/Invalid"
+  /api/v1/workspaces/{workspaceId}/members/{userId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Change a member's role.
+      description: |
+        Owners and admins may change roles. Only owners may make someone an
+        owner or change an owner's role, and the last owner cannot be
+        demoted. A real change writes a `member.role_changed` audit log entry
+        in the same transaction; setting the current role is a no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/Role" }
+      responses:
+        "200":
+          description: The member with their new role.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Member" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The workspace is not visible to the caller, or the user is not a member of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The change would leave the workspace without an owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
+    delete:
+      summary: Remove a member, or leave the workspace.
+      description: |
+        Owners and admins may remove other members; only owners may remove an
+        owner. Any member may remove themselves. The last owner can neither
+        be removed nor leave. Writes a `member.removed` audit log entry in the
+        same transaction.
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The workspace is not visible to the caller, or the user is not a member of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The caller is the last owner.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /api/v1/workspaces/{workspaceId}/invitations:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+    post:
+      summary: Invite someone by email.
+      description: |
+        Owners and admins may invite. The response carries the invitation
+        `token` once; only its SHA-256 hash is stored, so it cannot be shown
+        again. No email is sent: the inviter shares the accept link
+        themselves. Invitations expire after 7 days, can be used once, and
+        only by a signed-in user whose token email matches. An expired open
+        invitation for the same email is replaced. Writes an
+        `invitation.created` audit log entry in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, role]
+              properties:
+                email: { type: string, format: email, maxLength: 254, description: Trimmed and lowercased. }
+                role: { type: string, enum: [admin, developer, project_manager] }
+      responses:
+        "201":
+          description: "Created. Sent with `Cache-Control: no-store`."
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    allOf:
+                      - $ref: "#/components/schemas/Invitation"
+                      - type: object
+                        required: [token]
+                        properties:
+                          token: { type: string, description: Secret. Shown only in this response. }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "409":
+          description: The email belongs to a member, or an unexpired invitation for it is open.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
+    get:
+      summary: List open invitations, expired ones included, ordered by creation time.
+      description: Owners and admins only. Tokens are never listed.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of open invitations.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Invitation" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/WorkspaceNotFound"
+        "422":
+          $ref: "#/components/responses/Invalid"
+  /api/v1/workspaces/{workspaceId}/invitations/{invitationId}:
+    parameters:
+      - $ref: "#/components/parameters/WorkspaceId"
+      - name: invitationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      summary: Revoke an open invitation so its token stops working.
+      description: Owners and admins only. Writes an `invitation.revoked` audit log entry.
+      responses:
+        "204":
+          description: Revoked.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: The workspace is not visible, or no open invitation has that id.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /api/v1/invitations/accept:
+    post:
+      summary: Accept an invitation and join its workspace.
+      description: |
+        The token goes in the body, never the URL. The caller's token email
+        must match the invitation's. The membership, the invitation's
+        accepted mark and a `member.joined` audit log entry are written in
+        one transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token: { type: string }
+      responses:
+        "200":
+          description: Joined.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: object
+                    required: [workspace_id, role]
+                    properties:
+                      workspace_id: { type: string, format: uuid }
+                      role: { $ref: "#/components/schemas/Role" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller's email differs from the invitation's, or their account has no email.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: Unknown, revoked, used or expired token. All look the same.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The caller is already a member of the workspace.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
   /api/v1/conversations:
     post:
       summary: Start a conversation in a workspace.
@@ -438,6 +691,18 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
+    Forbidden:
+      description: The caller is a member but their role does not allow this.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
+    Invalid:
+      description: Malformed body or query, or invalid fields (details.fields).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorEnvelope"
     WorkspaceNotFound:
       description: |
         The workspace does not exist, the caller is not a member, or the id is
@@ -447,6 +712,11 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorEnvelope"
   parameters:
+    WorkspaceId:
+      name: workspaceId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
     Limit:
       name: limit
       in: query
@@ -528,6 +798,30 @@ components:
               type: { type: string, enum: [user, agent, runtime] }
               id: { type: string, format: uuid, description: A user, agent or runtime id depending on type. }
               joined_at: { type: string, format: date-time }
+    Role:
+      type: string
+      enum: [owner, admin, developer, project_manager]
+    Member:
+      type: object
+      required: [user_id, role, email, joined_at]
+      properties:
+        user_id: { type: string, format: uuid }
+        role: { $ref: "#/components/schemas/Role" }
+        email:
+          type: [string, "null"]
+          description: The email the member joined with; null for memberships created before it was recorded.
+        joined_at: { type: string, format: date-time }
+    Invitation:
+      type: object
+      required: [id, workspace_id, email, role, invited_by, expires_at, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        workspace_id: { type: string, format: uuid }
+        email: { type: string }
+        role: { type: string, enum: [admin, developer, project_manager] }
+        invited_by: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
     ErrorEnvelope:
       type: object
       required: [error]

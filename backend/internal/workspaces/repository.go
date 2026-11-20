@@ -39,7 +39,7 @@ func (r postgresRepository) Create(ctx context.Context, n NewWorkspace) (Workspa
 			return err
 		}
 		if err := q.InsertWorkspaceMember(ctx, store.InsertWorkspaceMemberParams{
-			WorkspaceID: row.ID, UserID: n.OwnerID, Role: string(authz.RoleOwner),
+			WorkspaceID: row.ID, UserID: n.OwnerID, Role: string(authz.RoleOwner), Email: optional(n.OwnerEmail),
 		}); err != nil {
 			return err
 		}
@@ -137,6 +137,13 @@ func memberRow(row store.GetWorkspaceForMemberRow) Workspace {
 		ID: row.ID, Name: row.Name, Slug: row.Slug, Role: authz.Role(row.Role),
 		CreatedBy: row.CreatedBy, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
+}
+
+func optional(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func translate(err error) error {
