@@ -23,6 +23,8 @@ type Agent struct {
 	LastSeenAt   time.Time
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	DisplayName  *string
+	Description  *string
 }
 
 type AgentProjectAccess struct {
