@@ -46,5 +46,5 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
       error: body?.error ?? { code: "internal", message: `API request failed with status ${res.status}` },
     };
   }
-  return { ok: true, status: res.status, data: body.data as T, meta: body.meta };
+  return { ok: true, status: res.status, data: body?.data as T, meta: body?.meta };
 }
