@@ -433,7 +433,7 @@ func TestAccessTokenWhenNotLoggedInOrRejected(t *testing.T) {
 
 	e.kc.items[e.srv.URL] = e.srv.Credential
 	e.srv.RevokeAll()
-	if _, err := e.client.AccessToken(t.Context(), e.cfg); !errors.Is(err, auth.ErrRejected) {
-		t.Errorf("revoked credential: err = %v, want ErrRejected", err)
+	if _, err := e.client.AccessToken(t.Context(), e.cfg); !errors.Is(err, auth.ErrCredentialRejected) {
+		t.Errorf("revoked credential: err = %v, want ErrCredentialRejected", err)
 	}
 }
