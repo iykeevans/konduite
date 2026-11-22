@@ -23,6 +23,8 @@ import (
 var (
 	ErrAlreadyLoggedIn = errors.New("already logged in: run agenthub logout first")
 	ErrInvalidInput    = errors.New("invalid login input")
+	ErrNotLoggedIn     = errors.New("not logged in: run agenthub login")
+	ErrRejected        = errors.New("the server rejected this runtime's credential (revoked or expired): run agenthub login")
 )
 
 const (
@@ -190,6 +192,28 @@ func (c Client) Status(ctx context.Context, cfg config.Config) (Status, error) {
 		st.RemoteErr = err
 	}
 	return st, nil
+}
+
+// AccessToken exchanges the stored refresh credential for a short-lived
+// runtime access token. It returns ErrNotLoggedIn when no credential is
+// stored and ErrRejected when the server refuses it.
+func (c Client) AccessToken(ctx context.Context, cfg config.Config) (string, error) {
+	account := accountFor(cfg)
+	cred, err := c.Keychain.Get(account)
+	if errors.Is(err, security.ErrNotFound) {
+		return "", ErrNotLoggedIn
+	}
+	if err != nil {
+		return "", err
+	}
+	sctx, cancel := context.WithTimeout(ctx, serverTimeout)
+	defer cancel()
+	tok, err := server{url: account, http: c.HTTP}.accessToken(sctx, cred)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr.Status == http.StatusUnauthorized {
+		return "", ErrRejected
+	}
+	return tok, err
 }
 
 // LoggedIn reports whether the keychain holds a credential for cfg's server.
