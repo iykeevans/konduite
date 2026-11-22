@@ -68,6 +68,7 @@ func New(opts Options) *cobra.Command {
 		newLogoutCmd(configPath, client),
 		newWhoamiCmd(configPath, client),
 		newStatusCmd(configPath, client),
+		newAgentsCmd(configPath, client),
 	)
 	return root
 }
