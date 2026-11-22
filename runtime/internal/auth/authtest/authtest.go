@@ -175,7 +175,7 @@ func (s *Supabase) token(w http.ResponseWriter, r *http.Request) {
 }
 
 // Server fakes the Konduite API's runtime registration, token exchange,
-// self lookup and revocation.
+// self lookup, revocation and the runtime's own agent routes.
 type Server struct {
 	*httptest.Server
 	UserToken   string
@@ -188,6 +188,18 @@ type Server struct {
 	revoked []string
 	tokens  []string
 	urls    []string
+	agents  []Agent
+}
+
+// Agent is an agent registered with the fake.
+type Agent struct {
+	ID          string `json:"id"`
+	RuntimeID   string `json:"runtime_id"`
+	Provider    string `json:"provider"`
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Status      string `json:"status"`
 }
 
 // NewServer starts a fake Konduite API that accepts userToken.
@@ -204,6 +216,8 @@ func NewServer(t *testing.T, userToken string) *Server {
 	mux.HandleFunc("POST /v1/runtime/revoke", s.revoke)
 	mux.HandleFunc("POST /v1/runtime/token", s.token)
 	mux.HandleFunc("GET /v1/runtime/self", s.self)
+	mux.HandleFunc("POST /v1/runtime/agents", s.registerAgent)
+	mux.HandleFunc("GET /v1/runtime/agents", s.listAgents)
 	s.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		s.urls = append(s.urls, r.URL.String())
@@ -337,6 +351,53 @@ func (s *Server) self(w http.ResponseWriter, r *http.Request) {
 		"revoked": slices.Contains(s.revoked, s.Credential), "credential_last_used_at": "2026-11-19T00:00:00Z",
 		"created_at": "2026-11-19T00:00:00Z", "updated_at": "2026-11-19T00:00:00Z",
 	}})
+}
+
+// Agents returns the agents registered so far.
+func (s *Server) Agents() []Agent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]Agent(nil), s.agents...)
+}
+
+func (s *Server) runtimeAuthorized(w http.ResponseWriter, r *http.Request) bool {
+	tok, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if tok == "" || !slices.Contains(s.tokens, tok) {
+		writeError(w, http.StatusUnauthorized, "unauthenticated", "invalid runtime access token")
+		return false
+	}
+	return true
+}
+
+func (s *Server) registerAgent(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.runtimeAuthorized(w, r) {
+		return
+	}
+	var a Agent
+	if err := json.NewDecoder(r.Body).Decode(&a); err != nil || a.Provider == "" || a.Name == "" {
+		writeError(w, http.StatusUnprocessableEntity, "invalid", "invalid agent registration")
+		return
+	}
+	for _, have := range s.agents {
+		if have.Provider == a.Provider && have.Name == a.Name {
+			writeError(w, http.StatusConflict, "conflict", "the runtime already has an agent with this provider and name")
+			return
+		}
+	}
+	a.ID, a.RuntimeID, a.Status = "agent-"+random(), s.RuntimeID, "offline"
+	s.agents = append(s.agents, a)
+	writeJSON(w, http.StatusCreated, map[string]any{"data": a})
+}
+
+func (s *Server) listAgents(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.runtimeAuthorized(w, r) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": append([]Agent{}, s.agents...)})
 }
 
 // Browser returns an opener that visits the URL like a browser whose user

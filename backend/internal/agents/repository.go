@@ -79,6 +79,12 @@ func fromRow(row store.Agent) (Agent, error) {
 	if row.Version != nil {
 		a.Version = *row.Version
 	}
+	if row.DisplayName != nil {
+		a.DisplayName = *row.DisplayName
+	}
+	if row.Description != nil {
+		a.Description = *row.Description
+	}
 	if err := json.Unmarshal(row.Capabilities, &a.Capabilities); err != nil {
 		return Agent{}, err
 	}

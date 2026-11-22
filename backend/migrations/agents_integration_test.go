@@ -60,6 +60,8 @@ func TestAgentColumnsAreChecked(t *testing.T) {
 		"empty name":                 `INSERT INTO agents (workspace_id, runtime_id, provider, name) VALUES ($1, $2, 'codex', '')`,
 		"bad status":                 `INSERT INTO agents (workspace_id, runtime_id, provider, name, status) VALUES ($1, $2, 'codex', 'a', 'asleep')`,
 		"capabilities not an object": `INSERT INTO agents (workspace_id, runtime_id, provider, name, capabilities) VALUES ($1, $2, 'codex', 'a', '[]')`,
+		"empty display name":         `INSERT INTO agents (workspace_id, runtime_id, provider, name, display_name) VALUES ($1, $2, 'codex', 'a', '')`,
+		"empty description":          `INSERT INTO agents (workspace_id, runtime_id, provider, name, description) VALUES ($1, $2, 'codex', 'a', '')`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			wantCode(t, exec(t, pool, sql, ws, rt), checkViolation)

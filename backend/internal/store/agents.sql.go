@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -28,8 +29,165 @@ func (q *Queries) AgentHasProjectAccess(ctx context.Context, arg AgentHasProject
 	return exists, err
 }
 
+const deleteAgent = `-- name: DeleteAgent :execrows
+DELETE FROM agents WHERE id = $1
+`
+
+func (q *Queries) DeleteAgent(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAgent, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const getAgent = `-- name: GetAgent :one
+SELECT id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description FROM agents WHERE id = $1
+`
+
+func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgent, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RuntimeID,
+		&i.Provider,
+		&i.Name,
+		&i.Version,
+		&i.Capabilities,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Description,
+	)
+	return i, err
+}
+
+const getAgentRuntime = `-- name: GetAgentRuntime :one
+SELECT id, workspace_id, owner_id FROM agent_runtime_instances WHERE id = $1
+`
+
+type GetAgentRuntimeRow struct {
+	ID          uuid.UUID
+	WorkspaceID uuid.UUID
+	OwnerID     uuid.UUID
+}
+
+func (q *Queries) GetAgentRuntime(ctx context.Context, id uuid.UUID) (GetAgentRuntimeRow, error) {
+	row := q.db.QueryRow(ctx, getAgentRuntime, id)
+	var i GetAgentRuntimeRow
+	err := row.Scan(&i.ID, &i.WorkspaceID, &i.OwnerID)
+	return i, err
+}
+
+const insertRegisteredAgent = `-- name: InsertRegisteredAgent :one
+INSERT INTO agents (workspace_id, runtime_id, provider, name, display_name, description, capabilities, status, last_seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, 'offline', now())
+RETURNING id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description
+`
+
+type InsertRegisteredAgentParams struct {
+	WorkspaceID  uuid.UUID
+	RuntimeID    uuid.UUID
+	Provider     string
+	Name         string
+	DisplayName  *string
+	Description  *string
+	Capabilities json.RawMessage
+}
+
+func (q *Queries) InsertRegisteredAgent(ctx context.Context, arg InsertRegisteredAgentParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, insertRegisteredAgent,
+		arg.WorkspaceID,
+		arg.RuntimeID,
+		arg.Provider,
+		arg.Name,
+		arg.DisplayName,
+		arg.Description,
+		arg.Capabilities,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RuntimeID,
+		&i.Provider,
+		&i.Name,
+		&i.Version,
+		&i.Capabilities,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Description,
+	)
+	return i, err
+}
+
+const listAgents = `-- name: ListAgents :many
+SELECT id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description FROM agents
+WHERE workspace_id = $1
+  AND ($2::uuid IS NULL OR runtime_id = $2::uuid)
+  AND ($3::timestamptz IS NULL
+       OR (created_at, id) < ($3::timestamptz, $4::uuid))
+ORDER BY created_at DESC, id DESC
+LIMIT $5
+`
+
+type ListAgentsParams struct {
+	WorkspaceID    uuid.UUID
+	RuntimeID      *uuid.UUID
+	AfterCreatedAt *time.Time
+	AfterID        *uuid.UUID
+	RowLimit       int32
+}
+
+func (q *Queries) ListAgents(ctx context.Context, arg ListAgentsParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listAgents,
+		arg.WorkspaceID,
+		arg.RuntimeID,
+		arg.AfterCreatedAt,
+		arg.AfterID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RuntimeID,
+			&i.Provider,
+			&i.Name,
+			&i.Version,
+			&i.Capabilities,
+			&i.Status,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DisplayName,
+			&i.Description,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimeAgents = `-- name: ListRuntimeAgents :many
-SELECT id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at FROM agents WHERE runtime_id = $1 ORDER BY provider, name
+SELECT id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description FROM agents WHERE runtime_id = $1 ORDER BY provider, name
 `
 
 func (q *Queries) ListRuntimeAgents(ctx context.Context, runtimeID uuid.UUID) ([]Agent, error) {
@@ -53,6 +211,8 @@ func (q *Queries) ListRuntimeAgents(ctx context.Context, runtimeID uuid.UUID) ([
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DisplayName,
+			&i.Description,
 		); err != nil {
 			return nil, err
 		}
@@ -62,6 +222,31 @@ func (q *Queries) ListRuntimeAgents(ctx context.Context, runtimeID uuid.UUID) ([
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAgent = `-- name: LockAgent :one
+SELECT id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description FROM agents WHERE id = $1 FOR NO KEY UPDATE
+`
+
+func (q *Queries) LockAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, lockAgent, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RuntimeID,
+		&i.Provider,
+		&i.Name,
+		&i.Version,
+		&i.Capabilities,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Description,
+	)
+	return i, err
 }
 
 const lockRuntimeForAgentSync = `-- name: LockRuntimeForAgentSync :one
@@ -90,6 +275,39 @@ func (q *Queries) MarkUnannouncedAgentsOffline(ctx context.Context, arg MarkUnan
 	return err
 }
 
+const updateAgentLabels = `-- name: UpdateAgentLabels :one
+UPDATE agents SET display_name = $1, description = $2, updated_at = now()
+WHERE id = $3
+RETURNING id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description
+`
+
+type UpdateAgentLabelsParams struct {
+	DisplayName *string
+	Description *string
+	ID          uuid.UUID
+}
+
+func (q *Queries) UpdateAgentLabels(ctx context.Context, arg UpdateAgentLabelsParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgentLabels, arg.DisplayName, arg.Description, arg.ID)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RuntimeID,
+		&i.Provider,
+		&i.Name,
+		&i.Version,
+		&i.Capabilities,
+		&i.Status,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Description,
+	)
+	return i, err
+}
+
 const upsertAnnouncedAgent = `-- name: UpsertAnnouncedAgent :one
 INSERT INTO agents (workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, 'online', now())
@@ -99,7 +317,7 @@ SET version = EXCLUDED.version,
     status = 'online',
     last_seen_at = EXCLUDED.last_seen_at,
     updated_at = now()
-RETURNING id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at
+RETURNING id, workspace_id, runtime_id, provider, name, version, capabilities, status, last_seen_at, created_at, updated_at, display_name, description
 `
 
 type UpsertAnnouncedAgentParams struct {
@@ -133,6 +351,8 @@ func (q *Queries) UpsertAnnouncedAgent(ctx context.Context, arg UpsertAnnouncedA
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DisplayName,
+		&i.Description,
 	)
 	return i, err
 }

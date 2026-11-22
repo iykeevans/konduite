@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"testing"
 
@@ -26,5 +28,15 @@ func TestAuthorizerWiringSupportsProjectChecks(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("err = nil, want the lookup against an unreachable database to fail")
+	}
+}
+
+func TestRuntimeVerifierRejectsATokenItDidNotSign(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runtimeVerifier(pub)("not.a.token"); err == nil {
+		t.Error("err = nil, want an unverifiable token rejected")
 	}
 }
