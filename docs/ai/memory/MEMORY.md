@@ -13,3 +13,4 @@ Read this index at task startup, then load the notes relevant to the work. Proje
 - [Parallel agent worktrees](parallel-agent-worktrees.md) — fresh worktree needs `next typegen` before the web type-check (LayoutProps); rerun an integration package alone when testcontainers miss their deadline.
 - [Workspace membership](workspace-membership.md) — invitation tokens hashed and shown once, accept link in a URL fragment POSTed in a body, email-bound accept, last-owner guard under row locks.
 - [Consumer retry and dead-letter](consumer-retry-and-dlq.md) — every consumer uses nats.Client.Consume; publish DLQ then Term; replay gets a new msg id; admin allow-list gate.
+- [Model routing](model-routing.md) — opusplan + Haiku subagents, ruflo and hooks off in this repo; which tier of ticket gets which model.

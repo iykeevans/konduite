@@ -36,6 +36,8 @@ If already on a branch outside `protected_branches`, stay on it. Otherwise:
 
 Run the `gates` commands that are set, from the repo root. Where the repo is a monorepo and a gate can be scoped to the touched packages or files, scope it. Run the tests colocated with changed modules.
 
+If the project defines a `gate-runner` agent, run the gates through it, passing the touched packages, so only failures come back into the conversation.
+
 If anything fails, stop: show the output and don't commit. A lint warning on a line the diff didn't touch predates the change; it isn't a blocker, but mention it. With no gates configured, say the change went in ungated.
 
 ## 4. Commit

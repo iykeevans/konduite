@@ -1,0 +1,16 @@
+{
+  "model": "opusplan",
+  "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "haiku",
+    "CLAUDE_FLOW_HOOKS_ENABLED": "false"
+  },
+  "disableAllHooks": true,
+  "enabledPlugins": {
+    "ruflo-core@ruflo": false,
+    "ruflo-console@ruflo": false,
+    "ruflo-mods@ruflo": false,
+    "ruflo-swarm@ruflo": false,
+    "cloudflare@cloudflare": false,
+    "revenuecat@claude-plugins-official": false
+  }
+}
