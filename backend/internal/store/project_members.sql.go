@@ -7,9 +7,24 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const deleteProjectMember = `-- name: DeleteProjectMember :exec
+DELETE FROM project_members WHERE project_id = $1 AND user_id = $2
+`
+
+type DeleteProjectMemberParams struct {
+	ProjectID uuid.UUID
+	UserID    uuid.UUID
+}
+
+func (q *Queries) DeleteProjectMember(ctx context.Context, arg DeleteProjectMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteProjectMember, arg.ProjectID, arg.UserID)
+	return err
+}
 
 const getProjectMembership = `-- name: GetProjectMembership :one
 SELECT
@@ -39,5 +54,186 @@ func (q *Queries) GetProjectMembership(ctx context.Context, arg GetProjectMember
 	row := q.db.QueryRow(ctx, getProjectMembership, arg.UserID, arg.ProjectID)
 	var i GetProjectMembershipRow
 	err := row.Scan(&i.WorkspaceID, &i.WorkspaceRole, &i.ProjectRole)
+	return i, err
+}
+
+const getProjectWorkspaceMember = `-- name: GetProjectWorkspaceMember :one
+SELECT p.workspace_id, wm.role AS workspace_role, wm.email
+FROM projects p
+JOIN workspace_members wm
+    ON wm.workspace_id = p.workspace_id AND wm.user_id = $1
+WHERE p.id = $2
+`
+
+type GetProjectWorkspaceMemberParams struct {
+	UserID    uuid.UUID
+	ProjectID uuid.UUID
+}
+
+type GetProjectWorkspaceMemberRow struct {
+	WorkspaceID   uuid.UUID
+	WorkspaceRole string
+	Email         *string
+}
+
+func (q *Queries) GetProjectWorkspaceMember(ctx context.Context, arg GetProjectWorkspaceMemberParams) (GetProjectWorkspaceMemberRow, error) {
+	row := q.db.QueryRow(ctx, getProjectWorkspaceMember, arg.UserID, arg.ProjectID)
+	var i GetProjectWorkspaceMemberRow
+	err := row.Scan(&i.WorkspaceID, &i.WorkspaceRole, &i.Email)
+	return i, err
+}
+
+const insertProjectMember = `-- name: InsertProjectMember :one
+INSERT INTO project_members (project_id, user_id, role)
+VALUES ($1, $2, $3)
+RETURNING user_id, role, joined_at
+`
+
+type InsertProjectMemberParams struct {
+	ProjectID uuid.UUID
+	UserID    uuid.UUID
+	Role      string
+}
+
+type InsertProjectMemberRow struct {
+	UserID   uuid.UUID
+	Role     string
+	JoinedAt time.Time
+}
+
+func (q *Queries) InsertProjectMember(ctx context.Context, arg InsertProjectMemberParams) (InsertProjectMemberRow, error) {
+	row := q.db.QueryRow(ctx, insertProjectMember, arg.ProjectID, arg.UserID, arg.Role)
+	var i InsertProjectMemberRow
+	err := row.Scan(&i.UserID, &i.Role, &i.JoinedAt)
+	return i, err
+}
+
+const listProjectMembers = `-- name: ListProjectMembers :many
+SELECT pm.user_id, pm.role, pm.joined_at, wm.email, wm.role AS workspace_role
+FROM project_members pm
+JOIN projects p ON p.id = pm.project_id
+JOIN workspace_members wm
+    ON wm.workspace_id = p.workspace_id AND wm.user_id = pm.user_id
+WHERE pm.project_id = $1
+  AND (pm.joined_at, pm.user_id) > ($2::timestamptz, $3::uuid)
+ORDER BY pm.joined_at, pm.user_id
+LIMIT $4
+`
+
+type ListProjectMembersParams struct {
+	ProjectID     uuid.UUID
+	AfterJoinedAt time.Time
+	AfterUserID   uuid.UUID
+	RowLimit      int32
+}
+
+type ListProjectMembersRow struct {
+	UserID        uuid.UUID
+	Role          string
+	JoinedAt      time.Time
+	Email         *string
+	WorkspaceRole string
+}
+
+// Rows of users who have since left the workspace are hidden: they no
+// longer grant access (authz requires workspace membership).
+func (q *Queries) ListProjectMembers(ctx context.Context, arg ListProjectMembersParams) ([]ListProjectMembersRow, error) {
+	rows, err := q.db.Query(ctx, listProjectMembers,
+		arg.ProjectID,
+		arg.AfterJoinedAt,
+		arg.AfterUserID,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListProjectMembersRow{}
+	for rows.Next() {
+		var i ListProjectMembersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Role,
+			&i.JoinedAt,
+			&i.Email,
+			&i.WorkspaceRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockProjectMembers = `-- name: LockProjectMembers :many
+SELECT pm.user_id, pm.role, pm.joined_at, wm.email, wm.role AS workspace_role
+FROM project_members pm
+JOIN projects p ON p.id = pm.project_id
+LEFT JOIN workspace_members wm
+    ON wm.workspace_id = p.workspace_id AND wm.user_id = pm.user_id
+WHERE pm.project_id = $1
+ORDER BY pm.user_id
+FOR UPDATE OF pm
+`
+
+type LockProjectMembersRow struct {
+	UserID        uuid.UUID
+	Role          string
+	JoinedAt      time.Time
+	Email         *string
+	WorkspaceRole *string
+}
+
+func (q *Queries) LockProjectMembers(ctx context.Context, projectID uuid.UUID) ([]LockProjectMembersRow, error) {
+	rows, err := q.db.Query(ctx, lockProjectMembers, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockProjectMembersRow{}
+	for rows.Next() {
+		var i LockProjectMembersRow
+		if err := rows.Scan(
+			&i.UserID,
+			&i.Role,
+			&i.JoinedAt,
+			&i.Email,
+			&i.WorkspaceRole,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateProjectMemberRole = `-- name: UpdateProjectMemberRole :one
+UPDATE project_members SET role = $1
+WHERE project_id = $2 AND user_id = $3
+RETURNING user_id, role, joined_at
+`
+
+type UpdateProjectMemberRoleParams struct {
+	Role      string
+	ProjectID uuid.UUID
+	UserID    uuid.UUID
+}
+
+type UpdateProjectMemberRoleRow struct {
+	UserID   uuid.UUID
+	Role     string
+	JoinedAt time.Time
+}
+
+func (q *Queries) UpdateProjectMemberRole(ctx context.Context, arg UpdateProjectMemberRoleParams) (UpdateProjectMemberRoleRow, error) {
+	row := q.db.QueryRow(ctx, updateProjectMemberRole, arg.Role, arg.ProjectID, arg.UserID)
+	var i UpdateProjectMemberRoleRow
+	err := row.Scan(&i.UserID, &i.Role, &i.JoinedAt)
 	return i, err
 }

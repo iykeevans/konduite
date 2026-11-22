@@ -708,6 +708,171 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/projects/{projectId}/members:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: List a project's members, ordered by join time.
+      description: |
+        Anyone who can view the project may list its members. Only explicit
+        project members are listed: workspace owners and admins maintain
+        every project without a row and appear only if added. People who
+        have left the workspace are left out.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: One page of project members.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProjectMember" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+        "422":
+          $ref: "#/components/responses/Invalid"
+    post:
+      summary: Add a workspace member to the project.
+      description: |
+        Project maintainers and workspace owners/admins may add members. The
+        user must already be a member of the project's workspace. Adding
+        someone who is already a project member is a 409; change their role
+        with PATCH instead. Writes a `project.member_added` audit log entry
+        in the same transaction.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [user_id, role]
+              properties:
+                user_id: { type: string, format: uuid }
+                role: { $ref: "#/components/schemas/ProjectRole" }
+      responses:
+        "201":
+          description: The new project member.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ProjectMember" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can view the project but cannot manage its members.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          $ref: "#/components/responses/ProjectNotFound"
+        "409":
+          description: The user is already a member of the project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          description: Malformed body, an invalid role, or a user_id that is not a member of the project's workspace (details.fields).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+  /api/v1/projects/{projectId}/members/{userId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    patch:
+      summary: Change a project member's role.
+      description: |
+        Project maintainers and workspace owners/admins may change roles.
+        The last maintainer cannot be demoted unless a workspace owner or
+        admin does it, since they maintain every project anyway. A real
+        change writes a `project.member_role_changed` audit log entry in the
+        same transaction; setting the current role is a no-op.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role]
+              properties:
+                role: { $ref: "#/components/schemas/ProjectRole" }
+      responses:
+        "200":
+          description: The member with their new role.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/ProjectMember" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can view the project but cannot manage its members.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: The project is not visible to the caller, or the user is not a member of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The change would leave the project without a maintainer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "422":
+          $ref: "#/components/responses/Invalid"
+    delete:
+      summary: Remove a project member, or leave the project.
+      description: |
+        Project maintainers and workspace owners/admins may remove anyone;
+        any project member may remove themselves. The last maintainer can be
+        removed only by a workspace owner or admin. Writes a
+        `project.member_removed` audit log entry in the same transaction.
+      responses:
+        "204":
+          description: Removed.
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can view the project but cannot manage its members.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "404":
+          description: The project is not visible to the caller, or the user is not a member of it.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+        "409":
+          description: The removal would leave the project without a maintainer.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorEnvelope" }
   /api/v1/conversations:
     post:
       summary: Start a conversation in a workspace.
@@ -1433,6 +1598,20 @@ components:
           type: [string, "null"]
           description: The email the member joined with; null for memberships created before it was recorded.
         joined_at: { type: string, format: date-time }
+    ProjectRole:
+      type: string
+      enum: [maintainer, contributor, viewer]
+    ProjectMember:
+      type: object
+      required: [user_id, role, email, workspace_role, joined_at]
+      properties:
+        user_id: { type: string, format: uuid }
+        role: { $ref: "#/components/schemas/ProjectRole" }
+        email:
+          type: [string, "null"]
+          description: The email the user joined the workspace with; null for memberships created before it was recorded.
+        workspace_role: { $ref: "#/components/schemas/Role" }
+        joined_at: { type: string, format: date-time, description: When the user joined the project. }
     Invitation:
       type: object
       required: [id, workspace_id, email, role, invited_by, expires_at, created_at]

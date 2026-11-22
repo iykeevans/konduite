@@ -33,6 +33,14 @@ Decided in SEC-001 (#24) and SEC-002 (#25), 2026-11-19. Code: `backend/internal/
 - **Wiring (explicit since 2026-11-20):** production builds the authorizer with `authz.NewWithProjects(authz.StoreMemberships(q))` (`newAuthorizer` in `cmd/api/main.go`); `NewWithProjects` takes a `Directory` (Memberships + ProjectMemberships), so dropping the project lookup is a compile error, and `cmd/api/main_test.go` checks the wiring. `authz.New(m)` still works for workspace-only test fakes and type-asserts `m` for project lookups; without one, project checks return `authz.ErrNoProjectLookup` (a 500).
 - **Agent hook (for SEC-003):** `authz.New(m, authz.WithGrants(kind, g))` routes principals of `kind` on `Project` resources to `g.ProjectActions(ctx, principalID, projectID)`; return `authz.ErrNoGrant` for no grant (404). The principal may do exactly the returned actions (else 403) and still can't see `Workspace` resources. Kinds without a registered `Grants` stay 404. SEC-003 registers the agent kind backed by `agent_project_access`.
 
+## Project members (PLAT-010, #20, 2026-11-20)
+
+- Code: `backend/internal/projectmembers`, routes `/projects/{projectID}/members[/{userID}]`. Manage needs `project.members.manage`; leaving yourself needs only `project.view`. Like `projects`, a 403 on `project.view` becomes 404.
+- Only members of the project's workspace can be added (else 422 on `user_id`). Re-adding is 409, not idempotent, because the body carries a role: change it with PATCH.
+- **Last-maintainer guard** (`CheckMaintainerChange`, table-tested): the last explicit maintainer can't be demoted or removed (409) unless a workspace owner/admin acts, since they maintain every project implicitly and the workspace always has an owner. The repository locks the project's `project_members` rows and counts only maintainers still in the workspace.
+- Rows of users who left the workspace stay in `project_members` (PLAT-008's removal doesn't cascade). They are hidden from the list and grant nothing, but can still be deleted.
+- Audit: `project.member_added`, `project.member_role_changed` (none for a no-op), `project.member_removed` (`self` flag), all `resource_type 'project'`, `resource_id` = project id, `metadata.user_id` = the member.
+
 ## Conversations in a project (2026-11-20)
 
 - A conversation with a `project_id` follows the project, not the workspace: reading needs `project.view`, creating needs `project.contribute` (viewers are read-only, as for messages). Workspace-wide conversations stay open to every member.
