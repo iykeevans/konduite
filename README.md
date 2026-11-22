@@ -19,6 +19,8 @@ scripts/github/        GitHub Projects bootstrap
 
 `go.work` ties the Go modules together for local development.
 
+Deploying the pilot: see [docs/deployment/pilot-runbook.md](docs/deployment/pilot-runbook.md).
+
 ## Prerequisites
 
 - Go 1.27+
