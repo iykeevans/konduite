@@ -192,6 +192,18 @@ func (c Client) Status(ctx context.Context, cfg config.Config) (Status, error) {
 	return st, nil
 }
 
+// AccessToken exchanges the stored refresh credential for a short-lived
+// runtime access token. It returns ErrNotLoggedIn when no credential is
+// stored and ErrCredentialRejected when the server refuses it.
+func (c Client) AccessToken(ctx context.Context, cfg config.Config) (string, error) {
+	var tok string
+	err := c.asRuntime(ctx, cfg, func(_ context.Context, _ server, h http.Header) error {
+		tok = strings.TrimPrefix(h.Get("Authorization"), "Bearer ")
+		return nil
+	})
+	return tok, err
+}
+
 // LoggedIn reports whether the keychain holds a credential for cfg's server.
 func (c Client) LoggedIn(cfg config.Config) (bool, error) {
 	_, err := c.Keychain.Get(accountFor(cfg))

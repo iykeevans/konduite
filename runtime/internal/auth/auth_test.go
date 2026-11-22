@@ -409,3 +409,31 @@ func TestLoggedIn(t *testing.T) {
 		t.Errorf("LoggedIn = %v, %v after login", ok, err)
 	}
 }
+
+func TestAccessTokenExchangesTheStoredCredential(t *testing.T) {
+	e := newEnv(t)
+	e.kc.items[e.srv.URL] = e.srv.Credential
+
+	tok, err := e.client.AccessToken(t.Context(), e.cfg)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued := e.srv.AccessTokens(); len(issued) != 1 || tok != issued[0] {
+		t.Errorf("token %q is not the one the server issued", tok)
+	}
+	e.assertNoSecretsInURLs(t)
+}
+
+func TestAccessTokenWhenNotLoggedInOrRejected(t *testing.T) {
+	e := newEnv(t)
+	if _, err := e.client.AccessToken(t.Context(), e.cfg); !errors.Is(err, auth.ErrNotLoggedIn) {
+		t.Errorf("without a credential: err = %v, want ErrNotLoggedIn", err)
+	}
+
+	e.kc.items[e.srv.URL] = e.srv.Credential
+	e.srv.RevokeAll()
+	if _, err := e.client.AccessToken(t.Context(), e.cfg); !errors.Is(err, auth.ErrCredentialRejected) {
+		t.Errorf("revoked credential: err = %v, want ErrCredentialRejected", err)
+	}
+}
