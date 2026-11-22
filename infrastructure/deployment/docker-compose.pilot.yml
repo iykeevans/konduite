@@ -1,0 +1,87 @@
+# Pilot deployment on a single VM against hosted Supabase and a hosted NATS
+# JetStream. Nothing stateful runs here. See docs/deployment/pilot-runbook.md.
+#
+#   cp infrastructure/deployment/pilot.env.example infrastructure/deployment/.env
+#   (fill it in; it is gitignored)
+#   docker compose -f infrastructure/deployment/docker-compose.pilot.yml \
+#     --env-file infrastructure/deployment/.env up -d --build
+name: konduite-pilot
+
+x-backend-env: &backend-env
+  APP_ENV: production
+  DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
+  SUPABASE_URL: ${SUPABASE_URL:?set SUPABASE_URL}
+  NATS_URL: ${NATS_URL:?set NATS_URL}
+  RUNTIME_TOKEN_SIGNING_KEY: ${RUNTIME_TOKEN_SIGNING_KEY:?set RUNTIME_TOKEN_SIGNING_KEY}
+  PLATFORM_ADMIN_USER_IDS: ${PLATFORM_ADMIN_USER_IDS:-}
+
+services:
+  # One-shot: applies pending goose migrations. Run it first (see the runbook);
+  # it sits behind a profile so `up` never migrates by surprise.
+  migrate:
+    profiles: [ops]
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: migrate
+    environment:
+      GOOSE_DBSTRING: ${DATABASE_URL:?set DATABASE_URL}
+    restart: "no"
+
+  # One-shot: creates or updates the JetStream streams.
+  nats-bootstrap:
+    profiles: [ops]
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: natsbootstrap
+    environment:
+      NATS_URL: ${NATS_URL:?set NATS_URL}
+    restart: "no"
+
+  api:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: api
+    environment: *backend-env
+    ports:
+      - "${API_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck", "http://127.0.0.1:8080/readyz"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: backend/Dockerfile
+      target: worker
+    environment: *backend-env
+    stop_grace_period: 45s
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?set NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:?set NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}
+    environment:
+      KONDUITE_API_URL: http://api:8080
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/login"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+    restart: unless-stopped
