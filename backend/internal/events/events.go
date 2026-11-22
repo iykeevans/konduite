@@ -73,7 +73,7 @@ func Enqueue(ctx context.Context, q Outbox, ev Event) (uuid.UUID, error) {
 	var subject *string
 	if ev.Subject != "" {
 		if !literalSubject(ev.Subject) {
-			return uuid.Nil, fmt.Errorf("%w: subject %q is not a literal subject under agenthub.", ErrInvalid, ev.Subject)
+			return uuid.Nil, fmt.Errorf("%w: subject %q must be a literal subject under agenthub", ErrInvalid, ev.Subject)
 		}
 		subject = &ev.Subject
 	}
