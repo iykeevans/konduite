@@ -110,7 +110,7 @@ func (s *Service) AddParticipant(ctx context.Context, p auth.Principal, conversa
 	if err := validateParticipant(in.Kind, in.ID); err != nil {
 		return Participant{}, false, err
 	}
-	c, err := s.changeable(ctx, p, conversationID)
+	c, err := s.Changeable(ctx, p, conversationID)
 	if err != nil {
 		return Participant{}, false, err
 	}
@@ -141,16 +141,17 @@ func (s *Service) RemoveParticipant(ctx context.Context, p auth.Principal, conve
 	if err := validateParticipant(kind, id); err != nil {
 		return err
 	}
-	c, err := s.changeable(ctx, p, conversationID)
+	c, err := s.Changeable(ctx, p, conversationID)
 	if err != nil {
 		return err
 	}
 	return s.repo.RemoveParticipant(ctx, c.ID, kind, id)
 }
 
-// changeable returns the conversation if p may change it: the same 404 as Get
-// when p cannot read it, 403 when p can read but not contribute.
-func (s *Service) changeable(ctx context.Context, p auth.Principal, id uuid.UUID) (Conversation, error) {
+// Changeable returns the conversation if p may contribute to it (post
+// messages, manage participants): the same 404 as Get when p cannot read it,
+// 403 when p can read but not contribute.
+func (s *Service) Changeable(ctx context.Context, p auth.Principal, id uuid.UUID) (Conversation, error) {
 	c, err := s.Get(ctx, p, id)
 	if err != nil {
 		return Conversation{}, err

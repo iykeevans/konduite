@@ -916,6 +916,122 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorEnvelope"
+  /api/v1/conversations/{id}/messages:
+    post:
+      summary: Post a message to a conversation as the caller.
+      description: |
+        Needs the right to contribute to the conversation: any workspace member
+        for a workspace-wide one, `project.contribute` for one in a project. The
+        sender is always the caller (type `user`); a `sender` in the body is
+        ignored. The caller becomes a participant if not one already, so
+        replies reach them.
+
+        One transaction takes the conversation's next sequence number, stores
+        the message, adds the participant and writes a `message.created` outbox
+        event (ids only, no content). The response is sent only after it
+        commits.
+
+        Send an `Idempotency-Key` header to make the request safe to retry: a
+        repeat with the same key from the same caller in the same conversation
+        returns 200 with the original message, unchanged even if the body
+        differs, and uses no sequence number. Without the header the server
+        generates a key, so a retried request creates a second message.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: Idempotency-Key
+          in: header
+          description: Client-chosen key, unique per sender and conversation (a UUID is a good choice). Validation errors for it are reported under `details.fields.idempotency_key`.
+          schema: { type: string, minLength: 1, maxLength: 255 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content: { type: string, minLength: 1, maxLength: 65536, description: Characters; must not be only whitespace. }
+                message_type: { type: string, enum: [text, task], default: text, description: "`system` messages are written by the platform only." }
+                parent_id: { type: string, format: uuid, description: A message in the same conversation. }
+                metadata: { type: object, additionalProperties: true, description: "Stored as given; defaults to {}." }
+      responses:
+        "201":
+          description: Stored and committed.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Message" }
+        "200":
+          description: A retry; the original message.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: "#/components/schemas/Message" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "403":
+          description: The caller can read the conversation but not contribute to it (a project viewer).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "404":
+          description: No such conversation, the caller cannot read it, or the id is not a UUID. Same response as GET /conversations/{id}.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: Malformed body, empty or oversized content, an unknown or system message_type, non-object metadata, a parent outside the conversation, or an over-long Idempotency-Key (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+    get:
+      summary: List a conversation's messages in sequence order.
+      description: |
+        Anyone who can read the conversation may list it. Pass `after_seq` with
+        the last sequence number you have, or the `cursor` from the previous
+        page, not both. Ordering guarantees beyond ascending sequence number
+        are refined in MSG-011.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: after_seq, in: query, description: Only messages with a higher sequence number., schema: { type: integer, format: int64, minimum: 0, default: 0 } }
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of messages, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, meta]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Message" }
+                  meta: { $ref: "#/components/schemas/PageMeta" }
+        "401":
+          $ref: "#/components/responses/Unauthenticated"
+        "404":
+          description: No such conversation, or the caller cannot read it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "422":
+          description: A bad after_seq, limit or cursor, or after_seq and cursor together (details.fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
   /api/v1/admin/dlq:
     get:
       summary: List dead-lettered events, oldest first. Platform admins only.
@@ -1278,6 +1394,25 @@ components:
           type: array
           description: Present on create and get, omitted in lists.
           items: { $ref: "#/components/schemas/Participant" }
+    Message:
+      type: object
+      required: [id, conversation_id, sequence_number, sender, idempotency_key, parent_id, message_type, content, metadata, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        sequence_number: { type: integer, format: int64, minimum: 1, description: Gapless and increasing within the conversation. }
+        sender:
+          type: object
+          required: [type, id]
+          properties:
+            type: { type: string, enum: [user, agent, runtime] }
+            id: { type: string, format: uuid }
+        idempotency_key: { type: string, description: The Idempotency-Key the message was posted with, or the one the server generated. }
+        parent_id: { type: [string, "null"], format: uuid }
+        message_type: { type: string, enum: [text, task, system] }
+        content: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
     Participant:
       type: object
       required: [type, id, joined_at]

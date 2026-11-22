@@ -118,6 +118,51 @@ func (q *Queries) InsertMessage(ctx context.Context, arg InsertMessageParams) (M
 	return i, err
 }
 
+const listMessagesAfter = `-- name: ListMessagesAfter :many
+SELECT id, conversation_id, sequence_number, sender_type, sender_id, idempotency_key, parent_id, message_type, content, metadata, created_at FROM messages
+WHERE conversation_id = $1 AND sequence_number > $2
+ORDER BY sequence_number
+LIMIT $3
+`
+
+type ListMessagesAfterParams struct {
+	ConversationID uuid.UUID
+	AfterSeq       int64
+	RowLimit       int32
+}
+
+func (q *Queries) ListMessagesAfter(ctx context.Context, arg ListMessagesAfterParams) ([]Message, error) {
+	rows, err := q.db.Query(ctx, listMessagesAfter, arg.ConversationID, arg.AfterSeq, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Message{}
+	for rows.Next() {
+		var i Message
+		if err := rows.Scan(
+			&i.ID,
+			&i.ConversationID,
+			&i.SequenceNumber,
+			&i.SenderType,
+			&i.SenderID,
+			&i.IdempotencyKey,
+			&i.ParentID,
+			&i.MessageType,
+			&i.Content,
+			&i.Metadata,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const nextConversationSeq = `-- name: NextConversationSeq :one
 UPDATE conversations SET last_seq = last_seq + 1
 WHERE id = $1

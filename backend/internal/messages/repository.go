@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/iykeevans/konduite/backend/internal/conversations"
+	"github.com/iykeevans/konduite/backend/internal/events"
 	"github.com/iykeevans/konduite/backend/internal/platform/db"
 	"github.com/iykeevans/konduite/backend/internal/store"
 )
@@ -36,6 +37,49 @@ func (r postgresRepository) Append(ctx context.Context, n NewMessage) (Message, 
 		return err
 	})
 	return m, created, err
+}
+
+func (r postgresRepository) Post(ctx context.Context, in Posting) (Message, bool, error) {
+	var (
+		m       Message
+		created bool
+	)
+	err := db.WithTx(ctx, r.pool, func(ctx context.Context, tx pgx.Tx) error {
+		var err error
+		m, created, err = AppendTx(ctx, tx, in.Message)
+		if err != nil || !created {
+			return err
+		}
+		q := store.New(tx)
+		if _, err := q.AddConversationParticipant(ctx, store.AddConversationParticipantParams{
+			ConversationID:  m.ConversationID,
+			ParticipantType: string(m.Sender.Kind),
+			ParticipantID:   m.Sender.ID,
+		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		_, err = events.Enqueue(ctx, q, CreatedEvent(m, in.WorkspaceID, in.ProjectID))
+		return err
+	})
+	if err != nil {
+		return Message{}, false, err
+	}
+	return m, created, nil
+}
+
+func (r postgresRepository) List(ctx context.Context, f ListFilter) ([]Message, error) {
+	rows, err := store.New(r.pool).ListMessagesAfter(ctx, store.ListMessagesAfterParams{
+		ConversationID: f.ConversationID, AfterSeq: f.AfterSeq,
+		RowLimit: int32(min(f.Limit, 1000)), //nolint:gosec // bounded just above
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Message, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, fromRow(row))
+	}
+	return out, nil
 }
 
 func (r postgresRepository) Get(ctx context.Context, id uuid.UUID) (Message, error) {
