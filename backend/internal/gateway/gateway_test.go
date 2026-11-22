@@ -164,11 +164,12 @@ func (h *harness) url() string {
 	return "ws" + strings.TrimPrefix(h.srv.URL, "http") + gateway.Path
 }
 
-func (h *harness) dial(t *testing.T, token string) *websocket.Conn {
+func (h *harness) dial(t *testing.T) *websocket.Conn {
+	const token = "tok"
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), wait)
 	defer cancel()
-	c, _, err := websocket.Dial(ctx, h.url(), &websocket.DialOptions{
+	c, _, err := websocket.Dial(ctx, h.url(), &websocket.DialOptions{ //nolint:bodyclose // a successful upgrade has no body to close
 		HTTPHeader: http.Header{"Authorization": {"Bearer " + token}},
 	})
 	if err != nil {
@@ -235,15 +236,16 @@ func recv[T any](t *testing.T, ch <-chan T, what string) T {
 
 // connected dials as a fresh runtime, says hello and waits until the
 // gateway has subscribed to the runtime's subject.
-func (h *harness) connected(t *testing.T, token string) (*websocket.Conn, runtimes.Claims) {
+func (h *harness) connected(t *testing.T) (*websocket.Conn, runtimes.Claims) {
 	t.Helper()
+	const token = "tok"
 	h.mu.Lock()
 	claims, ok := h.claims[token]
 	h.mu.Unlock()
 	if !ok {
 		claims = h.runtime(token)
 	}
-	c := h.dial(t, token)
+	c := h.dial(t)
 	send(t, c, helloFrame(t))
 	recv(t, h.agents.calls, "SyncFromHello")
 	if got := recv(t, h.bus.subscribed, "subscribe"); got != gateway.Subject(claims.RuntimeID) {
@@ -266,6 +268,9 @@ func TestConnectRejectsBadTokensBeforeUpgrading(t *testing.T) {
 				hdr.Set("Authorization", header)
 			}
 			_, resp, err := websocket.Dial(t.Context(), h.url(), &websocket.DialOptions{HTTPHeader: hdr})
+			if resp != nil {
+				defer func() { _ = resp.Body.Close() }()
+			}
 			if err == nil {
 				t.Fatal("dial succeeded")
 			}
@@ -282,7 +287,7 @@ func TestConnectRejectsBadTokensBeforeUpgrading(t *testing.T) {
 func TestConnectClosesWhenHelloDoesNotArriveInTime(t *testing.T) {
 	h := newHarness(t, func(c *gateway.Config) { c.HelloTimeout = 50 * time.Millisecond })
 	h.runtime("tok")
-	c := h.dial(t, "tok")
+	c := h.dial(t)
 	if got := closeCode(t, c); got != gateway.StatusHelloTimeout {
 		t.Errorf("close code = %d, want %d", got, gateway.StatusHelloTimeout)
 	}
@@ -303,7 +308,7 @@ func TestConnectClosesWithPolicyViolationOnABadFirstFrame(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, nil)
 			h.runtime("tok")
-			c := h.dial(t, "tok")
+			c := h.dial(t)
 			send(t, c, raw(t))
 			if got := closeCode(t, c); got != websocket.StatusPolicyViolation {
 				t.Errorf("close code = %d, want 1008", got)
@@ -318,7 +323,7 @@ func TestConnectClosesWithPolicyViolationOnABadFirstFrame(t *testing.T) {
 func TestConnectClosesOnABinaryMessage(t *testing.T) {
 	h := newHarness(t, nil)
 	h.runtime("tok")
-	c := h.dial(t, "tok")
+	c := h.dial(t)
 	ctx, cancel := context.WithTimeout(t.Context(), wait)
 	defer cancel()
 	if err := c.Write(ctx, websocket.MessageBinary, helloFrame(t)); err != nil {
@@ -332,7 +337,7 @@ func TestConnectClosesOnABinaryMessage(t *testing.T) {
 func TestHelloSyncsAgentsUnderTheTokensRuntime(t *testing.T) {
 	h := newHarness(t, nil)
 	claims := h.runtime("tok")
-	c := h.dial(t, "tok")
+	c := h.dial(t)
 	send(t, c, helloFrame(t))
 
 	call := recv(t, h.agents.calls, "SyncFromHello")
@@ -358,7 +363,7 @@ func TestHelloFailuresCloseTheConnection(t *testing.T) {
 			h := newHarness(t, nil)
 			h.agents.err = tc.err
 			h.runtime("tok")
-			c := h.dial(t, "tok")
+			c := h.dial(t)
 			send(t, c, helloFrame(t))
 			if got := closeCode(t, c); got != tc.want {
 				t.Errorf("close code = %d, want %d", got, tc.want)
@@ -372,7 +377,7 @@ func TestHelloFailuresCloseTheConnection(t *testing.T) {
 
 func TestFramesAfterHelloReachTheReceiver(t *testing.T) {
 	h := newHarness(t, nil)
-	c, _ := h.connected(t, "tok")
+	c, _ := h.connected(t)
 	send(t, c, frame(t, "runtime.heartbeat", map[string]any{}))
 	if f := recv(t, h.received, "heartbeat"); f.Type != "runtime.heartbeat" {
 		t.Errorf("received %q", f.Type)
@@ -386,7 +391,7 @@ func TestInvalidFrameAfterHelloCloses(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, nil)
-			c, claims := h.connected(t, "tok")
+			c, claims := h.connected(t)
 			send(t, c, raw(t))
 			if got := closeCode(t, c); got != websocket.StatusPolicyViolation {
 				t.Errorf("close code = %d, want 1008", got)
@@ -402,7 +407,7 @@ func TestMessagesOnTheRuntimeSubjectReachTheDeliverer(t *testing.T) {
 	h := newHarness(t, nil)
 	push := contracts.Frame{ID: uuid.NewString(), Type: "runtime.heartbeat", Version: 1, SentAt: time.Now().UTC(), Data: json.RawMessage(`{}`)}
 	h.deliverer.push = &push
-	c, claims := h.connected(t, "tok")
+	c, claims := h.connected(t)
 
 	subject := "agenthub.rt." + claims.RuntimeID.String() + ".deliver"
 	h.bus.publish(gateway.Subject(claims.RuntimeID), nats.Msg{Subject: subject, MsgID: "evt-1", Data: []byte(`{"x":1}`)})
@@ -436,7 +441,7 @@ func TestMessagesOnTheRuntimeSubjectReachTheDeliverer(t *testing.T) {
 
 func TestSendRejectsAFrameThatBreaksItsContract(t *testing.T) {
 	h := newHarness(t, nil)
-	_, claims := h.connected(t, "tok")
+	_, claims := h.connected(t)
 	h.bus.publish(gateway.Subject(claims.RuntimeID), nats.Msg{Subject: "s"})
 	n := recv(t, h.deliverer.got, "Notify")
 	err := n.conn.Send(t.Context(), contracts.Frame{ID: "not-a-uuid", Type: "runtime.heartbeat", Version: 1, SentAt: time.Now(), Data: json.RawMessage(`{}`)})
@@ -447,8 +452,8 @@ func TestSendRejectsAFrameThatBreaksItsContract(t *testing.T) {
 
 func TestASecondConnectionReplacesTheFirst(t *testing.T) {
 	h := newHarness(t, nil)
-	first, claims := h.connected(t, "tok")
-	second, _ := h.connected(t, "tok")
+	first, claims := h.connected(t)
+	second, _ := h.connected(t)
 
 	if got := closeCode(t, first); got != gateway.StatusReplaced {
 		t.Errorf("first close code = %d, want %d", got, gateway.StatusReplaced)
@@ -469,8 +474,8 @@ func TestASecondConnectionReplacesTheFirst(t *testing.T) {
 
 func TestShutdownClosesOpenConnectionsAndRefusesNewOnes(t *testing.T) {
 	h := newHarness(t, nil)
-	c, _ := h.connected(t, "tok")
-	pending := h.dial(t, "tok")
+	c, _ := h.connected(t)
+	pending := h.dial(t)
 
 	codes := make(chan websocket.StatusCode, 2)
 	go func() { codes <- closeCode(t, c) }()
@@ -486,9 +491,10 @@ func TestShutdownClosesOpenConnectionsAndRefusesNewOnes(t *testing.T) {
 		}
 	}
 
-	late, _, err := websocket.Dial(ctx, h.url(), &websocket.DialOptions{
-		HTTPHeader: http.Header{"Authorization": {"Bearer tok"}},
-	})
+	late, _, err := websocket.Dial( //nolint:bodyclose // a successful upgrade has no body to close
+		ctx, h.url(), &websocket.DialOptions{
+			HTTPHeader: http.Header{"Authorization": {"Bearer tok"}},
+		})
 	if err == nil {
 		if got := closeCode(t, late); got != websocket.StatusGoingAway {
 			t.Errorf("connection after shutdown closed with %d, want 1001", got)
@@ -501,7 +507,7 @@ func TestAPeerThatStopsAnsweringPingsIsDropped(t *testing.T) {
 		c.PingInterval = 20 * time.Millisecond
 		c.PongTimeout = 50 * time.Millisecond
 	})
-	_, claims := h.connected(t, "tok")
+	_, claims := h.connected(t)
 	if got := recv(t, h.bus.unsubscribed, "unsubscribe after a missed pong"); got != gateway.Subject(claims.RuntimeID) {
 		t.Errorf("unsubscribed %q", got)
 	}
