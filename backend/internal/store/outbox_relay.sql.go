@@ -13,7 +13,7 @@ import (
 )
 
 const claimOutboxBatch = `-- name: ClaimOutboxBatch :many
-SELECT id, event_type, payload FROM outbox_events
+SELECT id, event_type, subject, payload FROM outbox_events
 WHERE published_at IS NULL
 ORDER BY created_at
 LIMIT $1
@@ -23,6 +23,7 @@ FOR UPDATE SKIP LOCKED
 type ClaimOutboxBatchRow struct {
 	ID        uuid.UUID
 	EventType string
+	Subject   *string
 	Payload   json.RawMessage
 }
 
@@ -35,7 +36,12 @@ func (q *Queries) ClaimOutboxBatch(ctx context.Context, limit int32) ([]ClaimOut
 	items := []ClaimOutboxBatchRow{}
 	for rows.Next() {
 		var i ClaimOutboxBatchRow
-		if err := rows.Scan(&i.ID, &i.EventType, &i.Payload); err != nil {
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventType,
+			&i.Subject,
+			&i.Payload,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

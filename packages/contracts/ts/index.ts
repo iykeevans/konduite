@@ -3,6 +3,7 @@
 export type * from "./envelope";
 export type * from "./events.message.created.v1";
 export type * from "./events.runtime.connected.v1";
+export type * from "./events.runtime.deliver.v1";
 export type * from "./events.runtime.disconnected.v1";
 export type * from "./frame";
 export type * from "./frames.runtime.event_ack.v1";
